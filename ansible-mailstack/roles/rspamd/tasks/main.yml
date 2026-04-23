@@ -1,0 +1,313 @@
+---
+# Determine if we need to install Rspamd or just configure
+- name: Determine Rspamd operation mode
+  ansible.builtin.set_fact:
+    rspamd_install_required: "{{ rspamd_install | default(true) | bool }}"
+
+# ============================================
+# INSTALLATION MODE
+# ============================================
+- block:
+    - name: Add Rspamd GPG key
+      ansible.builtin.apt_key:
+        url: https://rspamd.com/apt-stable/gpg.key
+        state: present
+
+    - name: Add Rspamd repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://rspamd.com/apt-stable/ {{ ansible_distribution_release }}
+          main"
+        state: present
+        filename: rspamd
+
+    - name: Update apt cache after adding Rspamd repo
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Rspamd packages
+      ansible.builtin.apt:
+        name:
+          - rspamd
+          - mysql-client # For DKIM script to query database
+        state: present
+        update_cache: yes
+
+    - name: Create Rspamd local.d directory
+      ansible.builtin.file:
+        path: /etc/rspamd/local.d
+        state: directory
+        owner: _rspamd
+        group: _rspamd
+        mode: "0755"
+
+    - name: Create Rspamd override.d directory
+      ansible.builtin.file:
+        path: /etc/rspamd/override.d
+        state: directory
+        owner: _rspamd
+        group: _rspamd
+        mode: "0755"
+
+    - name: Create Rspamd log directory
+      ansible.builtin.file:
+        path: /var/log/rspamd
+        state: directory
+        owner: _rspamd
+        group: _rspamd
+        mode: "0755"
+
+    - name: Create Rspamd maps.d directory for signing table
+      ansible.builtin.file:
+        path: /etc/rspamd/maps.d
+        state: directory
+        owner: _rspamd
+        group: _rspamd
+        mode: "0755"
+
+  when: rspamd_install_required
+
+# ============================================
+# REMOVE CONFLICTING CONFIGURATIONS
+# ============================================
+
+- name: Remove conflicting antivirus configurations
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/rspamd/antivirus.conf
+    - /etc/rspamd/override.d/antivirus.conf
+    - /etc/rspamd/override.d/milter_headers.conf
+  ignore_errors: true
+  notify: restart rspamd
+
+# ============================================
+# COMMON: Deploy Configuration (both modes)
+# ============================================
+
+- name: Deploy Rspamd local configurations
+  ansible.builtin.template:
+    src: "local.d/{{ item }}.j2"
+    dest: "/etc/rspamd/local.d/{{ item }}"
+    owner: _rspamd
+    group: _rspamd
+    mode: "0644"
+  loop:
+    - worker-controller.inc
+    - worker-proxy.inc
+    - worker-normal.inc
+    - redis.conf
+    - classifier-bayes.conf
+    - milter_headers.conf
+    - actions.conf
+    - logging.inc
+    - groups.conf
+    - options.inc
+    - dmarc.conf
+    - dkim_signing.conf
+    - ratelimit.conf
+  notify: restart rspamd
+
+- name: Deploy ClamAV antivirus configuration
+  ansible.builtin.template:
+    src: antivirus.conf.j2
+    dest: /etc/rspamd/local.d/antivirus.conf
+    owner: _rspamd
+    group: _rspamd
+    mode: "0644"
+  when: rspamd_clamav_enabled | default(true)
+  notify: restart rspamd
+
+- name: Remove ClamAV antivirus configuration if disabled
+  ansible.builtin.file:
+    path: /etc/rspamd/local.d/antivirus.conf
+    state: absent
+  when: not (rspamd_clamav_enabled | default(true))
+  notify: restart rspamd
+
+# ============================================
+# DKIM AUTO-GENERATION SCRIPTS
+# ============================================
+
+- name: Deploy generate-dkim-keys script
+  ansible.builtin.copy:
+    src: "scripts/generate_dkim_keys.sh"
+    dest: /usr/local/bin/generate-dkim-keys
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy dkim-autogen wrapper script
+  ansible.builtin.copy:
+    src: "scripts/dkim-autogen.sh"
+    dest: /usr/local/bin/dkim-autogen
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy systemd service file for DKIM auto-generation
+  ansible.builtin.copy:
+    src: "files/dkim-autogen.service"
+    dest: /etc/systemd/system/dkim-autogen.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy systemd timer file for DKIM auto-generation
+  ansible.builtin.copy:
+    src: "files/dkim-autogen.timer"
+    dest: /etc/systemd/system/dkim-autogen.timer
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable and start dkim-autogen timer
+  ansible.builtin.systemd:
+    name: dkim-autogen.timer
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+# ============================================
+# INSTALLATION MODE: Start Service
+# ============================================
+
+- name: Ensure Rspamd defaults file exists
+  ansible.builtin.file:
+    path: /etc/default/rspamd
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  when: rspamd_install_required
+
+- name: Start and enable Rspamd
+  ansible.builtin.systemd:
+    name: rspamd
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: rspamd_install_required
+
+- name: Wait for Rspamd to be ready
+  ansible.builtin.wait_for:
+    port: "{{ rspamd_controller_port }}"
+    timeout: 30
+  when: rspamd_install_required
+
+# ============================================
+# INITIAL DKIM KEY GENERATION
+# ============================================
+
+- name: Run initial DKIM key generation for all domains
+  ansible.builtin.command:
+    cmd: /usr/local/bin/generate-dkim-keys -a
+  register: dkim_initial_run
+  changed_when: "'New keys generated: 0' not in dkim_initial_run.stdout"
+  failed_when: false
+
+- name: Display DKIM generation result
+  ansible.builtin.debug:
+    msg: "{{ dkim_initial_run.stdout_lines }}"
+  when: dkim_initial_run.stdout_lines | length > 0
+
+# ============================================
+# WhiteList Generation (if ratelimit enabled)
+# ============================================
+
+- name: Build comprehensive whitelist from inventory
+  ansible.builtin.set_fact:
+    _all_inventory_hosts: >-
+      {%- set ips = [] -%} {%- for host in ansible_play_hosts_all -%}
+        {%- if hostvars[host].ansible_host is defined -%}
+          {%- set _ = ips.append(hostvars[host].ansible_host) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ ips | unique | sort }}
+  run_once: true
+  when: rspamd_ratelimit_enabled | default(true)
+
+- name: Debug whitelist size
+  ansible.builtin.debug:
+    msg: "Whitelist will contain {{ _all_inventory_hosts | length }} IP addresses
+      from inventory"
+  run_once: true
+  when: rspamd_ratelimit_enabled | default(true)
+
+- name: Deploy whitelist IP map
+  ansible.builtin.template:
+    src: whitelist-ip.map.j2
+    dest: "{{ rspamd_ratelimit_whitelist_ip_path }}"
+    owner: _rspamd
+    group: _rspamd
+    mode: "0644"
+  notify: restart rspamd
+  when: rspamd_ratelimit_enabled | default(true)
+
+# ============================================
+# VERIFICATION
+# ============================================
+
+- name: Test Rspamd controller connectivity
+  ansible.builtin.uri:
+    url: "http://localhost:{{ rspamd_controller_port }}/stat"
+    return_content: yes
+  register: rspamd_test
+  ignore_errors: true
+  when: rspamd_install_required
+
+- name: Validate Rspamd configuration
+  ansible.builtin.command:
+    cmd: rspamadm configtest
+  register: rspamd_configtest
+  changed_when: false
+  failed_when: false
+
+- name: Show Rspamd config validation result
+  ansible.builtin.debug:
+    msg: "{{ rspamd_configtest.stdout_lines + rspamd_configtest.stderr_lines }}"
+  when: rspamd_configtest.rc != 0
+
+- name: Fail if Rspamd configuration is invalid
+  ansible.builtin.fail:
+    msg: "Rspamd configuration is invalid - check output above"
+  when: rspamd_configtest.rc != 0
+
+- name: Verify DKIM signing table exists
+  ansible.builtin.stat:
+    path: /etc/rspamd/maps.d/dkim_signing.map
+  register: signing_table_check
+
+- name: Display signing table status
+  ansible.builtin.debug:
+    msg: "DKIM signing table: {{ 'EXISTS' if signing_table_check.stat.exists else
+      'MISSING' }}"
+
+- name: Show signing table contents (if exists)
+  ansible.builtin.command:
+    cmd: cat /etc/rspamd/maps.d/dkim_signing.map
+  register: signing_table_contents
+  when: signing_table_check.stat.exists
+
+- name: Display signing table contents
+  ansible.builtin.debug:
+    msg: "{{ signing_table_contents.stdout_lines }}"
+  when: signing_table_check.stat.exists
+
+- name: Display Rspamd status
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Rspamd Configuration Status"
+      - "============================================================"
+      - "Mode: {{ 'Local Installation' if rspamd_install_required else
+        'Configuration Only' }}"
+      - "Controller: http://{{ rspamd_bind_address }}:{{ rspamd_controller_port
+        }}"
+      - "Milter Port: {{ rspamd_milter_port }}"
+      - "Valkey Backend: {{ valkey_host }}:{{ valkey_port }}"
+      - "ClamAV: {{ 'Enabled' if rspamd_clamav_enabled | default(true) else
+        'Disabled' }}"
+      - "DKIM Auto-Generation: Enabled (timer runs every 5 minutes)"
+      - "DKIM Signing Table: {{ 'EXISTS' if signing_table_check.stat.exists else
+        'MISSING' }}"
+      - "============================================================"

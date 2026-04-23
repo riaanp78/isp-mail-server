@@ -1,0 +1,11 @@
+# Redis/Valkey configuration for Rspamd
+# Managed by Ansible
+
+servers = "{{ valkey_host }}:{{ valkey_port }}";
+{% if valkey_password | length > 0 %}
+password = "{{ valkey_password }}";
+{% endif %}
+
+# Connection pool settings
+pool_size = 10;
+timeout = 5s;

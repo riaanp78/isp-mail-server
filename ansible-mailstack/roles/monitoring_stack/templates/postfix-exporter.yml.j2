@@ -1,0 +1,11 @@
+# Managed by Ansible - Postfix Exporter Configuration
+# Documentation: https://github.com/kumina/postfix_exporter
+
+# Listen address and port
+ARGS="--web.listen-address=:9154"
+
+# Path to postfix log file
+# ARGS="--web.listen-address=:9154 --file.log_path=/var/log/mail.log"
+
+# For multiple log files (e.g., rotated logs):
+# ARGS="--web.listen-address=:9154 --file.log_path=/var/log/mail.log --file.log_path=/var/log/mail.log.1"

@@ -1,0 +1,44 @@
+# ClamAV Daemon Configuration
+# Managed by Ansible
+
+# Network settings
+TCPSocket {{ clamav_port | int }}
+TCPAddr {{ clamav_bind_address }}
+MaxConnectionQueueLength 30
+MaxThreads {{ clamav_max_connections | int }}
+
+# --- REQUIRED FOR RSPAMD INSTREAM ---
+StreamMaxLength {{ clamav_max_file_size }}
+# ------------------------------------
+
+# File size limits
+MaxFileSize {{ clamav_max_file_size }}
+MaxScanSize 400M
+MaxRecursion {{ clamav_max_recursion | int }}
+MaxFiles 10000
+
+# Detection
+ScanPE yes
+ScanELF yes
+ScanOLE2 yes
+ScanHTML yes
+ScanPDF yes
+ScanArchive yes
+ScanMail yes
+PhishingSignatures yes
+
+# Logging
+LogFile /var/log/clamav/clamav.log
+LogTime yes
+LogClean yes
+
+# Database & Socket
+DatabaseDirectory /var/lib/clamav
+LocalSocket /var/run/clamav/clamd.ctl
+FixStaleSocket yes
+User clamav
+
+# Free up memory back to the OS faster
+LeaveTemporaryFiles no
+
+

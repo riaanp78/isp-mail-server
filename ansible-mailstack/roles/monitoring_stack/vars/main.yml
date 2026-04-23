@@ -1,0 +1,3 @@
+---
+monitoring_compose_file: "{{ monitoring_base_dir }}/docker-compose.yml"
+

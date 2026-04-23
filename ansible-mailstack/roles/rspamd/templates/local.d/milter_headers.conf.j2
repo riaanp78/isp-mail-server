@@ -1,0 +1,7 @@
+# /etc/rspamd/local.d/milter_headers.conf
+# Managed by Ansible - Rspamd 4.0
+
+use = ["x-spamd-bar", "x-spam-status", "x-spamd-result", "authentication-results"]
+extended_spam_headers = true
+skip_local = false
+skip_authenticated = false

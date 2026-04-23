@@ -1,0 +1,36 @@
+---
+- name: Deploy MySQL for mailstack
+  hosts: mysql_servers
+  become: true
+  gather_facts: true
+  
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+    
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - python3-mysqldb
+          - python3-pymysql
+        state: present
+
+  roles:
+    - role: mysql
+      # This tells Ansible to look in ./roles/mysql
+
+  post_tasks:
+    - name: Verify database creation
+      ansible.builtin.mysql_query:
+        login_user: root
+        login_password: "{{ db_root_password }}"
+        query: "SHOW DATABASES LIKE '{{ db_name }}'"
+      register: db_check
+      ignore_errors: true
+    
+    - name: Display database status
+      ansible.builtin.debug:
+        msg: "Database {{ db_name }} created successfully"
+      when: db_check is success

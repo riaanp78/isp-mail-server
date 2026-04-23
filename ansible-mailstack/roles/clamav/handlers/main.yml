@@ -1,0 +1,18 @@
+---
+- name: restart clamav-daemon
+  ansible.builtin.systemd:
+    name: clamav-daemon
+    state: restarted
+    daemon_reload: true
+
+- name: stop clamav-socket
+  ansible.builtin.systemd:
+    name: clamav-daemon.socket
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+- name: restart clamav-freshclam
+  ansible.builtin.systemd:
+    name: clamav-freshclam
+    state: restarted

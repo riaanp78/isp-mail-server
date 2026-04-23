@@ -1,0 +1,11 @@
+---
+- name: restart dovecot
+  ansible.builtin.systemd:
+    name: dovecot
+    state: restarted
+    daemon_reload: yes
+
+- name: compile sieve
+  ansible.builtin.command:
+    cmd: sievec /etc/dovecot/sieve/default.sieve
+    creates: /etc/dovecot/sieve/default.svbin

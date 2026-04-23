@@ -1,0 +1,251 @@
+---
+# 1. Install Postfix and dependencies
+- name: Install Postfix packages
+  ansible.builtin.apt:
+    name: "{{ postfix_packages }}"
+    state: present
+    update_cache: yes
+  notify: restart postfix
+
+# 2. Install and configure rsyslog for Postfix logging
+- name: Ensure rsyslog is installed
+  ansible.builtin.apt:
+    name: rsyslog
+    state: present
+
+- name: Ensure rsyslog service is running
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: started
+    enabled: yes
+
+- name: Ensure Postfix log directory exists
+  ansible.builtin.file:
+    path: /var/log/postfix
+    state: directory
+    owner: syslog
+    group: adm
+    mode: "0755"
+
+- name: Configure rsyslog for mail logging with traditional format
+  ansible.builtin.copy:
+    dest: /etc/rsyslog.d/10-mail.conf
+    content: |
+      # Mail logging with traditional syslog format (required for Postfix exporter)
+      $ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+
+      mail.*      -/var/log/mail.log
+      mail.err     /var/log/mail.err
+
+      # Stop processing mail logs here (don't send to syslog)
+      & stop
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart rsyslog
+
+- name: Prevent mail logs from entering syslog catch-all
+  ansible.builtin.lineinfile:
+    path: /etc/rsyslog.d/50-default.conf
+    regexp: "^\\*\\.\\*;auth,authpriv\\.none"
+    line: "*.*;auth,authpriv,mail.none          -/var/log/syslog"
+  notify: restart rsyslog
+
+- name: Comment out existing mail rules in 50-default.conf
+  ansible.builtin.replace:
+    path: /etc/rsyslog.d/50-default.conf
+    regexp: "^([^#]*mail\\..*)"
+    replace: "# \\1"
+  notify: restart rsyslog
+
+- name: Remove conflicting rsyslog configs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/rsyslog.d/00-postfix.conf
+    - /etc/rsyslog.d/10-postfix.conf
+    - /etc/rsyslog.d/99-postfix.conf
+  ignore_errors: true
+  notify: restart rsyslog
+
+- name: Create Postfix mail log file with proper permissions
+  ansible.builtin.file:
+    path: /var/log/mail.log
+    state: touch
+    owner: syslog
+    group: adm
+    mode: "0640"
+  notify: restart rsyslog
+
+- name: Create Postfix mail error log file
+  ansible.builtin.file:
+    path: /var/log/mail.err
+    state: touch
+    owner: syslog
+    group: adm
+    mode: "0640"
+  notify: restart rsyslog
+
+# 3. Create necessary directories
+- name: Create Postfix directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/postfix/sql
+    - /var/spool/postfix
+    - /var/log/postfix
+
+# 4. Configure MySQL lookup files
+- name: Deploy MySQL virtual maps
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/postfix/{{ item }}"
+    owner: root
+    group: root
+    mode: "0640"
+  loop:
+    - mysql_virtual_domains_maps.cf
+    - mysql_virtual_alias_maps.cf
+    - mysql_virtual_mailbox_maps.cf
+  notify: restart postfix
+
+# 5. Remove any transport maps that might override LMTP
+- name: Remove transport map files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/postfix/transport
+    - /etc/postfix/transport.db
+  ignore_errors: true
+
+- name: Ensure transport_maps is empty in main.cf
+  ansible.builtin.lineinfile:
+    path: "{{ postfix_main_cf }}"
+    regexp: "^transport_maps"
+    state: absent
+  notify: restart postfix
+
+# 6. Deploy main configuration
+- name: Deploy main.cf
+  ansible.builtin.template:
+    src: main.cf.j2
+    dest: "{{ postfix_main_cf }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart postfix
+
+# 7. Deploy master.cf
+- name: Deploy master.cf
+  ansible.builtin.template:
+    src: master.cf.j2
+    dest: "{{ postfix_master_cf }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart postfix
+
+# 8. Run postfix upgrade-configuration (fixes postlog service)
+- name: Run postfix upgrade-configuration
+  ansible.builtin.command:
+    cmd: postfix upgrade-configuration
+  register: postfix_upgrade
+  changed_when: false
+  failed_when: false
+
+- name: Display upgrade result
+  ansible.builtin.debug:
+    msg: "Postfix upgrade: {{ postfix_upgrade.stdout }}"
+  when: postfix_upgrade.stdout | length > 0
+
+# 9. Ensure SSL directory exists
+- name: Ensure SSL directory exists
+  ansible.builtin.file:
+    path: /etc/ssl/private
+    state: directory
+    mode: "0755"
+
+# 10. Generate self-signed SSL certificate if needed
+- name: Generate private key
+  ansible.builtin.command:
+    cmd: "openssl genrsa -out {{ ssl_key_path }} 2048"
+    creates: "{{ ssl_key_path }}"
+  when: ssl_self_signed | default(true)
+
+- name: Generate certificate signing request
+  ansible.builtin.command:
+    cmd: "openssl req -new -key {{ ssl_key_path }} -out /tmp/mail.csr -subj '/CN={{
+      mail_hostname }}'"
+    creates: /tmp/mail.csr
+  when: ssl_self_signed | default(true)
+
+- name: Generate self-signed certificate
+  ansible.builtin.command:
+    cmd: "openssl x509 -req -days 365 -in /tmp/mail.csr -signkey {{ ssl_key_path }}
+      -out {{ ssl_cert_path }}"
+    creates: "{{ ssl_cert_path }}"
+  when: ssl_self_signed | default(true)
+
+- name: Remove temporary CSR file
+  ansible.builtin.file:
+    path: /tmp/mail.csr
+    state: absent
+  when: ssl_self_signed | default(true)
+
+# 11. Configure firewall (optional)
+- name: Configure UFW for Postfix
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - 25 # SMTP
+    - 465 # SMTPS
+    - 587 # Submission
+  when: configure_firewall | default(false)
+
+# 12. Validate configuration
+- name: Validate Postfix configuration
+  ansible.builtin.command:
+    cmd: postfix check
+  register: postfix_check
+  changed_when: false
+  failed_when: false
+
+- name: Debug Postfix configuration errors
+  ansible.builtin.debug:
+    msg: "Postfix Error: {{ postfix_check.stderr }}"
+  when: postfix_check.rc != 0
+
+- name: Hard fail if postfix check fails
+  ansible.builtin.fail:
+    msg: "Postfix configuration is invalid"
+  when: postfix_check.rc != 0
+
+# 13. Start and enable Postfix
+- name: Start and enable Postfix
+  ansible.builtin.systemd:
+    name: "{{ postfix_service }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+# 14. Test database connectivity
+- name: Test MySQL connection from Postfix
+  ansible.builtin.command:
+    cmd: "postmap -q {{ mail_domain }}
+      mysql:/etc/postfix/mysql_virtual_domains_maps.cf"
+  register: domain_test
+  ignore_errors: true
+  changed_when: false
+
+- name: Display domain lookup result
+  ansible.builtin.debug:
+    msg: "Domain lookup: {{ domain_test.stdout if domain_test.rc == 0 else 'Failed'
+      }}"

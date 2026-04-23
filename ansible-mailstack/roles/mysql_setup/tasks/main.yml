@@ -1,0 +1,56 @@
+---
+- name: Create mailserver and roundcube databases
+  community.mysql.mysql_db:
+    name: "{{ item }}"
+    state: present
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+  loop:
+    - "{{ db_name }}"
+    - "{{ roundcube_db_name | default('roundcubemail') }}"
+
+- name: Create mailserver application user (Docker friendly)
+  community.mysql.mysql_user:
+    name: "{{ db_user }}"
+    host: "%"
+    password: "{{ db_password }}"
+    priv: "{{ db_name }}.*:ALL"
+    state: present
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+
+- name: Create Roundcube application user (Docker friendly)
+  community.mysql.mysql_user:
+    name: "{{ roundcube_db_user | default('roundcube') }}"
+    host: "%"
+    password: "{{ roundcube_db_password | default(db_password) }}"
+    priv: "{{ roundcube_db_name | default('roundcubemail') }}.*:ALL"
+    state: present
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+
+- name: Copy mailserver schema to remote host
+  ansible.builtin.copy:
+    # We go up one level from the playbook dir to reach the project root
+    src: "{{ playbook_dir }}/../files/mail_schema.sql"
+    dest: "/tmp/mail_schema.sql"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Import mailserver schema
+  community.mysql.mysql_db:
+    name: "{{ db_name }}"
+    state: import
+    target: "/tmp/mail_schema.sql"
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+
+- name: Remove temporary schema file
+  ansible.builtin.file:
+    path: "/tmp/mail_schema.sql"
+    state: absent

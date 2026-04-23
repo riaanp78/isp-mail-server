@@ -1,0 +1,6 @@
+auth_mechanisms = plain login
+auth_allow_cleartext = no
+auth_username_format = %{user | lower}
+
+# In 2.4.3, we include the database resource and query definitions
+!include auth-sql.conf.ext

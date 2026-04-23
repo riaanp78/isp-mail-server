@@ -1,0 +1,142 @@
+---
+# Determine if we need to install Valkey or just configure connection
+- name: Determine Valkey operation mode
+  ansible.builtin.set_fact:
+    valkey_install_required: "{{ valkey_install | default(true) | bool }}"
+
+# ============================================
+# INSTALLATION MODE (VM/Bare Metal)
+# ============================================
+- block:
+    - name: Install Valkey packages
+      ansible.builtin.apt:
+        name:
+          - valkey-server
+          - valkey-sentinel
+        state: present
+        update_cache: yes
+
+    - name: Configure Valkey bind address
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^bind '
+        line: 'bind 0.0.0.0'
+      notify: restart valkey
+
+    - name: Configure Valkey port
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^port '
+        line: 'port {{ valkey_port }}'
+      notify: restart valkey
+
+    - name: Configure Valkey password
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^requirepass'
+        line: 'requirepass {{ valkey_password }}'
+      when: valkey_password | length > 0
+      notify: restart valkey
+
+    - name: Configure Valkey max memory
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^maxmemory '
+        line: 'maxmemory {{ valkey_maxmemory }}'
+      notify: restart valkey
+
+    - name: Configure Valkey max memory policy
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^maxmemory-policy'
+        line: 'maxmemory-policy {{ valkey_maxmemory_policy }}'
+      notify: restart valkey
+
+    - name: Configure Valkey timeout
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^timeout '
+        line: 'timeout {{ valkey_timeout }}'
+      notify: restart valkey
+
+    - name: Configure Valkey TCP keepalive
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^tcp-keepalive'
+        line: 'tcp-keepalive {{ valkey_tcp_keepalive }}'
+      notify: restart valkey
+
+    - name: Configure Valkey persistence
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^save '
+        line: 'save 900 1'
+      notify: restart valkey
+
+    - name: Configure Valkey log file
+      ansible.builtin.lineinfile:
+        path: /etc/valkey/valkey.conf
+        regexp: '^logfile '
+        line: 'logfile /var/log/valkey/valkey.log'
+      notify: restart valkey
+
+    - name: Configure firewall for Valkey
+      ansible.builtin.ufw:
+        rule: allow
+        port: "{{ valkey_port }}"
+        proto: tcp
+      when: configure_firewall | default(false)
+
+    - name: Start and enable Valkey
+      ansible.builtin.systemd:
+        name: valkey-server
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Wait for Valkey to be ready
+      ansible.builtin.wait_for:
+        port: "{{ valkey_port }}"
+        timeout: 30
+
+  when: valkey_install_required
+
+# ============================================
+# CONFIGURATION ONLY MODE (Kubernetes/External)
+# ============================================
+- block:
+    - name: Create external Valkey connection configuration
+      ansible.builtin.template:
+        src: external.conf.j2
+        dest: /etc/valkey/external.conf
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Create Valkey connection symlink for applications
+      ansible.builtin.file:
+        src: /etc/valkey/external.conf
+        dest: /etc/valkey/valkey.conf
+        state: link
+        force: yes
+
+  when: not valkey_install_required
+
+# ============================================
+# COMMON: Display status
+# ============================================
+
+- name: Display Valkey status
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Valkey Configuration Status
+      ============================================================
+      Mode: {{ 'Local Installation' if valkey_install_required else 'External (Kubernetes/Sentinel)' }}
+      Role: {{ valkey_role | default('primary') }}
+      Host: {{ valkey_host | default('N/A - Using Sentinel') }}
+      Port: {{ valkey_port | default('N/A') }}
+      {% if valkey_role == 'sentinel' or valkey_role == 'kubernetes' %}
+      Sentinel Hosts: {{ valkey_sentinel_hosts | default([valkey_host + ':' + (valkey_sentinel_port | default('26379'))]) | join(',') }}
+      {% endif %}
+      ============================================================

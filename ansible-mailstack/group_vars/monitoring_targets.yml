@@ -1,0 +1,3 @@
+---
+# Servers that will have node_exporter and other exporters
+monitoring_targets: "{{ groups['all'] | difference(groups['monitoring_server']) }}"

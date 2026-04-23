@@ -1,0 +1,16 @@
+# /etc/rspamd/local.d/dkim_signing.conf
+enabled = true;
+
+sign_authenticated = true;
+sign_local = true;
+
+use_domain = "header";
+selector = "mail";
+signing_table = "/etc/rspamd/maps.d/dkim_signing.map";
+path = "/var/lib/rspamd/dkim/$domain.$selector.key";
+
+allow_username_mismatch = true;
+try_fallback = false;
+
+# Fixed: Joined as a colon-delimited string for Rspamd 4.x
+sign_headers = "(o)from:(x)sender:(o)reply-to:(o)subject:(x)date:(x)message-id:(o)to:(o)cc:(x)mime-version:(x)content-type:(x)content-transfer-encoding";

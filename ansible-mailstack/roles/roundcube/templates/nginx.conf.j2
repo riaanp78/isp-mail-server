@@ -1,0 +1,43 @@
+# Managed by Ansible - DO NOT EDIT MANUALLY
+# Roundcube webmail reverse proxy (Nginx container)
+
+server {
+    listen 80;
+    
+    # Security headers (basic hardening)
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Hide server version
+    server_tokens off;
+
+    # Logging
+    access_log /var/log/nginx/roundcube_access.log;
+    error_log /var/log/nginx/roundcube_error.log;
+
+    # Health check endpoint for HAProxy (no logging)
+    location = /health-check {
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+
+    # Proxy to Roundcube container
+    location / {
+        proxy_pass http://roundcube:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Increase max body size for file uploads
+    client_max_body_size {{ roundcube_upload_max_filesize }};
+}

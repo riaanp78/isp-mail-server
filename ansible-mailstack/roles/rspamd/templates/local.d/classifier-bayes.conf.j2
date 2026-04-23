@@ -1,0 +1,25 @@
+# Bayesian classifier configuration
+# Managed by Ansible
+
+servers = "{{ valkey_host }}:{{ valkey_port }}";
+backend = "redis";
+{% if valkey_password | length > 0 %}
+password = "{{ valkey_password }}";
+{% endif %}
+
+# Minimum number of learns before auto-learning
+min_learns = {{ rspamd_bayes_min_learns }};
+min_ham = {{ rspamd_bayes_min_ham }};
+
+# Statistics configuration
+statfile {
+  symbol = "BAYES_HAM";
+  spam = false;
+  expire = 86400;  # 1 day
+}
+
+statfile {
+  symbol = "BAYES_SPAM";
+  spam = true;
+  expire = 86400;  # 1 day
+}

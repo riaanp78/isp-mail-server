@@ -1,0 +1,18 @@
+# ClamAV antivirus integration (Rspamd 4.0)
+# Managed by Ansible
+# /etc/rspamd/local.d/antivirus.conf
+{% if rspamd_clamav_enabled | default(true) %}
+clamav {
+  type = "clamav";
+  servers = [{{ groups['clamav_servers'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '^(.*)$', '"\\1:' + clamav_port | string + '"') | join(', ') }}];
+  symbol = "CLAM_VIRUS";
+  action = "reject";
+  message = '${SCANNER}: virus found: "${VIRUS}"';
+
+  # --- THESE ARE THE CRITICAL LINES ---
+  scan_mime_parts = false;
+  min_size = 1;
+  # ------------------------------------
+}
+
+{% endif %}

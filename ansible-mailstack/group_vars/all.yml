@@ -1,0 +1,27 @@
+---
+# Keep only what you actually use:
+# Mail storage paths
+vmail_home: "/var/vmail"
+vmail_uid: 5100
+vmail_gid: 5100
+
+# Index paths (local storage, not on NFS)
+vmail_index_path: "/var/indexes"
+vmail_volatile_path: "/dev/shm/dovecot"
+
+# Service accounts (keep if used)
+service_accounts:
+  dovecot: { uid: 5000, gid: 5000, user: dovecot, group: dovecot }
+  postfix: { uid: 5001, gid: 5001, user: postfix, group: postfix }
+  # ... only if you actually reference these in templates
+
+# Database connection
+db_host: "{{ endpoints.mysql.host }}"
+db_port: "{{ endpoints.mysql.port }}"
+db_name: "mailserver"
+db_user: "mailuser"
+db_password: "CHANGE_ME_STRONG_PASSWORD"
+
+# Mail domain
+mail_domain: "example.com"
+mail_hostname: "mail.{{ mail_domain }}"

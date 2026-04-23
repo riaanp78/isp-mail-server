@@ -1,0 +1,34 @@
+---
+- name: Deploy Postfix MTA with Dovecot backend
+  hosts: postfix_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - openssl
+          - ca-certificates
+          - python3-pymysql
+          - ufw
+          - netcat-openbsd
+        state: present
+
+  roles:
+    - postfix
+
+  post_tasks:
+    - name: Display Postfix deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ Postfix Deployment Complete"
+          - "============================================================"
+          - "Postfix has been deployed on {{ inventory_hostname }}"
+          - "============================================================"

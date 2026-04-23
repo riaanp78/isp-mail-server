@@ -1,0 +1,47 @@
+---
+- name: Install MySQL server and dependencies
+  ansible.builtin.apt:
+    name:
+      - mysql-server
+      - python3-mysqldb
+      - python3-pymysql
+    state: present
+
+- name: Ensure MySQL service is running
+  ansible.builtin.systemd:
+    name: mysql
+    state: started
+    enabled: yes
+
+- name: Configure MySQL to listen on all interfaces
+  ansible.builtin.lineinfile:
+    path: /etc/mysql/mysql.conf.d/mysqld.cnf
+    regexp: '^bind-address'
+    line: 'bind-address = 0.0.0.0'
+  notify: restart mysql
+
+- name: Configure root user for local access with full privileges
+  community.mysql.mysql_user:
+    name: root
+    host: "{{ item }}"
+    password: "{{ db_root_password }}"
+    priv: "*.*:ALL,GRANT"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    check_implicit_admin: yes
+    state: present
+  loop:
+    - "localhost"
+    - "127.0.0.1"
+    - "::1"
+  when: inventory_hostname == groups['mysql_servers'][0]
+
+- name: Configure root user for internal management networks
+  community.mysql.mysql_user:
+    name: root
+    host: "{{ item }}"
+    password: "{{ db_root_password }}"
+    priv: "*.*:ALL,GRANT"
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+  loop: "{{ internal_networks | reject('search', '127.0.0.0') | list }}"
+  when: inventory_hostname == groups['mysql_servers'][0]

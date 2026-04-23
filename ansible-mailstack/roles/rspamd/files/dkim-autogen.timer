@@ -1,0 +1,15 @@
+[Unit]
+Description=DKIM Auto-Generation Timer (runs every 5 minutes with jitter)
+Requires=dkim-autogen.service
+
+[Timer]
+# Start 2 minutes after boot
+OnBootSec=2min
+# Run every 5 minutes
+OnUnitActiveSec=5min
+# Randomize delay up to 60 seconds
+RandomizedDelaySec=60
+AccuracySec=1sec
+
+[Install]
+WantedBy=timers.target

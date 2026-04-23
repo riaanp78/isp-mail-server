@@ -1,0 +1,439 @@
+# ============================================
+# POSTFIX EXPORTER (sergeymakinen/postfix_exporter)
+# ============================================
+
+# - name: Remove old prometheus-postfix-exporter Debian package
+#   ansible.builtin.apt:
+#     name: prometheus-postfix-exporter
+#     state: absent
+#   when:
+#     - inventory_hostname in groups['postfix_servers']
+#     - postfix_exporter | default(false)
+#   ignore_errors: true
+
+- name: Create postfix_exporter system user
+  ansible.builtin.user:
+    name: postfix_exporter
+    system: yes
+    shell: /usr/sbin/nologin
+    create_home: no
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Add postfix_exporter to adm group for log access
+  ansible.builtin.user:
+    name: postfix_exporter
+    groups: adm
+    append: yes
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+  notify: restart postfix-exporter
+
+- name: Download postfix_exporter binary
+  ansible.builtin.get_url:
+    url: "https://github.com/sergeymakinen/postfix_exporter/releases/download/v{{
+      postfix_exporter_version }}/postfix_exporter_{{ postfix_exporter_version
+      }}_linux_amd64.tar.gz"
+    dest: "/tmp/postfix_exporter_{{ postfix_exporter_version }}_linux_amd64.tar.gz"
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Extract postfix_exporter binary
+  ansible.builtin.unarchive:
+    src: "/tmp/postfix_exporter_{{ postfix_exporter_version }}_linux_amd64.tar.gz"
+    dest: /tmp
+    remote_src: yes
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Install postfix_exporter binary (binary extracts directly to /tmp)
+  ansible.builtin.copy:
+    src: /tmp/postfix_exporter
+    dest: /usr/local/bin/postfix_exporter
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: yes
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+  notify: restart postfix-exporter
+
+- name: Clean up temporary files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/postfix_exporter
+    - "/tmp/postfix_exporter_{{ postfix_exporter_version }}_linux_amd64.tar.gz"
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Create postfix_exporter systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/postfix_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus Postfix Exporter
+      After=network.target postfix.service
+
+      [Service]
+      User=postfix_exporter
+      Group=postfix_exporter
+      Type=simple
+      ExecStart=/usr/local/bin/postfix_exporter \
+        --web.listen-address=:9154 \
+        --file.log=/var/log/mail.log
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Reload systemd to recognize new service
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Enable and start postfix_exporter service
+  ansible.builtin.systemd:
+    name: postfix_exporter
+    state: started
+    enabled: yes
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Verify postfix_exporter is running
+  ansible.builtin.wait_for:
+    port: 9154
+    host: "0.0.0.0"
+    timeout: 30
+  when:
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+- name: Allow postfix_exporter port in UFW
+  ansible.builtin.ufw:
+    rule: allow
+    port: "9154"
+    proto: tcp
+  when:
+    - configure_firewall | default(false)
+    - inventory_hostname in groups['postfix_servers']
+    - postfix_exporter | default(false)
+
+# ============================================
+# UNBOUND EXPORTER
+# ============================================
+
+- name: Create unbound_exporter system user
+  ansible.builtin.user:
+    name: unbound_exporter
+    system: yes
+    shell: /usr/sbin/nologin
+    create_home: no
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Add unbound_exporter to unbound group
+  ansible.builtin.user:
+    name: unbound_exporter
+    groups: unbound
+    append: yes
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+  notify: restart unbound-exporter
+
+- name: Download unbound_exporter Debian package
+  ansible.builtin.get_url:
+    url: "https://github.com/letsencrypt/unbound_exporter/releases/download/v{{
+      unbound_exporter_version }}/unbound_exporter-v{{ unbound_exporter_version
+      }}.x86_64.deb"
+    dest: "/tmp/unbound_exporter-v{{ unbound_exporter_version }}.x86_64.deb"
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Install unbound_exporter Debian package with force (allow downgrade)
+  ansible.builtin.command:
+    cmd: dpkg -i --force-downgrade /tmp/unbound_exporter-v{{
+      unbound_exporter_version }}.x86_64.deb
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+  register: deb_install
+  changed_when: deb_install.rc == 0
+
+- name: Clean up Debian package
+  ansible.builtin.file:
+    path: "/tmp/unbound_exporter-v{{ unbound_exporter_version }}.x86_64.deb"
+    state: absent
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Create unbound_exporter systemd service (run as unbound user)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/unbound_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus Unbound Exporter
+      After=network.target unbound.service
+
+      [Service]
+      User=unbound
+      Group=unbound
+      Type=simple
+      ExecStart=/usr/bin/unbound_exporter \
+        -unbound.host "unix:///run/unbound.ctl" \
+        -unbound.ca "" \
+        -unbound.cert "" \
+        -unbound.key "" \
+        -web.listen-address ":9167"
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Reload systemd to recognize new service
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Enable and start unbound_exporter service
+  ansible.builtin.systemd:
+    name: unbound_exporter
+    state: started
+    enabled: yes
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Verify unbound_exporter is running
+  ansible.builtin.wait_for:
+    port: 9167
+    host: "0.0.0.0"
+    timeout: 30
+  when:
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+- name: Allow unbound_exporter port in UFW
+  ansible.builtin.ufw:
+    rule: allow
+    port: "9167"
+    proto: tcp
+  when:
+    - configure_firewall | default(false)
+    - inventory_hostname in groups['rspamd_servers']
+    - unbound_exporter | default(false)
+
+# ============================================
+# VALKEY/REDIS EXPORTER
+# ============================================
+
+- name: Install prometheus-redis-exporter from Debian repository
+  ansible.builtin.apt:
+    name: prometheus-redis-exporter
+    state: present
+    update_cache: yes
+  when:
+    - inventory_hostname in groups['valkey_servers']
+    - valkey_redis_exporter | default(false)
+  notify: restart redis-exporter
+
+- name: Configure Redis exporter for Valkey
+  ansible.builtin.template:
+    src: redis-exporter.env.j2
+    dest: /etc/default/prometheus-redis-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - inventory_hostname in groups['valkey_servers']
+    - valkey_redis_exporter | default(false)
+  notify: restart redis-exporter
+
+- name: Ensure redis-exporter service is running
+  ansible.builtin.systemd:
+    name: prometheus-redis-exporter
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when:
+    - inventory_hostname in groups['valkey_servers']
+    - valkey_redis_exporter | default(false)
+
+- name: Verify redis-exporter is running
+  ansible.builtin.wait_for:
+    port: 9121
+    host: "0.0.0.0"
+    timeout: 30
+  when:
+    - inventory_hostname in groups['valkey_servers']
+    - valkey_redis_exporter | default(false)
+
+- name: Allow redis-exporter port in UFW
+  ansible.builtin.ufw:
+    rule: allow
+    port: "9121"
+    proto: tcp
+  when:
+    - configure_firewall | default(false)
+    - inventory_hostname in groups['valkey_servers']
+    - valkey_redis_exporter | default(false)
+
+# ============================================
+# CLAMAV EXPORTER
+# ============================================
+
+- name: Remove old prometheus-clamav-exporter Debian package (if exists)
+  ansible.builtin.apt:
+    name: prometheus-clamav-exporter
+    state: absent
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+  ignore_errors: true
+
+- name: Create clamav_exporter system user
+  ansible.builtin.user:
+    name: clamav_exporter
+    system: yes
+    shell: /usr/sbin/nologin
+    create_home: no
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Add clamav_exporter to clamav group for socket access
+  ansible.builtin.user:
+    name: clamav_exporter
+    groups: clamav
+    append: yes
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+  notify: restart clamav-exporter
+
+- name: Download clamav_exporter binary
+  ansible.builtin.get_url:
+    url: "https://github.com/sergeymakinen/clamav_exporter/releases/download/v{{
+      clamav_exporter_version }}/clamav_exporter_{{ clamav_exporter_version
+      }}_linux_amd64.tar.gz"
+    dest: "/tmp/clamav_exporter_{{ clamav_exporter_version }}_linux_amd64.tar.gz"
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Extract clamav_exporter binary
+  ansible.builtin.unarchive:
+    src: "/tmp/clamav_exporter_{{ clamav_exporter_version }}_linux_amd64.tar.gz"
+    dest: /tmp
+    remote_src: yes
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Install clamav_exporter binary
+  ansible.builtin.copy:
+    src: /tmp/clamav_exporter
+    dest: /usr/local/bin/clamav_exporter
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: yes
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+  notify: restart clamav-exporter
+
+- name: Clean up temporary files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/clamav_exporter
+    - "/tmp/clamav_exporter_{{ clamav_exporter_version }}_linux_amd64.tar.gz"
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Create clamav_exporter systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/clamav_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus ClamAV Exporter
+      After=network.target clamav-daemon.service
+      Wants=clamav-daemon.service
+
+      [Service]
+      User=clamav_exporter
+      Group=clamav_exporter
+      Type=simple
+      ExecStart=/usr/local/bin/clamav_exporter \
+        --web.listen-address=:9155 \
+        --clamav.address=tcp://127.0.0.1:3310
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+
+- name: Reload systemd to recognize new service
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Enable and start clamav_exporter service
+  ansible.builtin.systemd:
+    name: clamav_exporter
+    state: started
+    enabled: yes
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Verify clamav_exporter is running
+  ansible.builtin.wait_for:
+    port: 9155
+    host: "0.0.0.0"
+    timeout: 30
+  when:
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)
+
+- name: Allow clamav_exporter port in UFW
+  ansible.builtin.ufw:
+    rule: allow
+    port: "9155"
+    proto: tcp
+  when:
+    - configure_firewall | default(false)
+    - inventory_hostname in groups['clamav_servers']
+    - clamav_exporter | default(false)

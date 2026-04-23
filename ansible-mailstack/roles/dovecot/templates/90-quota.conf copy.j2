@@ -1,0 +1,41 @@
+### Quota Configuration (Native 2.4.3)
+# Based on: https://doc.dovecot.org/2.4.3/core/plugins/quota.html
+
+# Enable quota plugin globally
+mail_plugins {
+  quota = yes
+}
+
+# Enable IMAP QUOTA extension for IMAP protocol
+protocol imap {
+  mail_plugins {
+    imap_quota = yes
+  }
+}
+
+# Optional: Custom quota exceeded message (top-level setting)
+quota_exceeded_message = User %{user} has exhausted allowed storage space.
+
+# Recommended: Use count driver with index tracking
+mailbox_list_index = yes
+
+# Performance: Avoid vsize calculation delays during delivery
+protocol !indexer-worker {
+  mail_vsize_bg_after_count = 100
+}
+
+# Define the quota root
+quota "User quota" {
+  quota_driver = count
+  quota_storage_size = {{ dovecot_default_quota | default('1G') }}
+  
+  # Optional: Add grace to allow last message to exceed quota slightly
+  # quota_storage_grace = 10 M
+  
+  # Optional: Ignore Trash folder from quota (uncomment if desired)
+  # namespace inbox {
+  #   mailbox Trash {
+  #     quota_ignore = yes
+  #   }
+  # }
+}

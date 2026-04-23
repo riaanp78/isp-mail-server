@@ -1,0 +1,13 @@
+[Unit]
+Description=DKIM Auto-Generation Service for MailStack
+After=network.target rspamd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dkim-autogen
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

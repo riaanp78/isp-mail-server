@@ -1,0 +1,60 @@
+### Native 2.4.3 Service Configuration
+
+service imap-login {
+  inet_listener imap {
+    port = 143
+  }
+  inet_listener imaps {
+    port = 993
+    ssl = yes
+  }
+}
+
+service managesieve-login {
+  inet_listener sieve {
+    port = {{ dovecot_managesieve_port | default(4190) }}
+  }
+}
+
+service lmtp {
+  user = vmail
+  # Listen on TCP port for remote Postfix connections
+  # Binds to all interfaces (0.0.0.0) by default
+  inet_listener lmtp {
+    port = {{ dovecot_lmtp_port | default(24) }}
+  }
+}
+
+service anvil {
+  unix_listener anvil-auth-penalty {
+    user = vmail
+    group = vmail
+    mode = 0660
+  }
+  unix_listener anvil {
+    user = vmail
+    group = vmail
+    mode = 0660
+  }
+}
+service stats {
+  unix_listener stats-writer {
+    user = vmail
+    group = vmail
+    mode = 0660
+  }
+}
+
+service auth {
+  # For remote Postfix SASL authentication (TCP)
+  # Binds to all interfaces (0.0.0.0) by default
+  inet_listener auth {
+    port = {{ dovecot_sasl_port | default(12345) }}
+  }
+  # Dovecot internal auth (for doveadm and local lookups)
+  unix_listener auth-userdb {
+    mode = 0600
+    user = vmail
+    group = vmail
+  }
+}

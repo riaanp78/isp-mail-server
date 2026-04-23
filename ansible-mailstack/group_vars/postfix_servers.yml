@@ -1,0 +1,16 @@
+---
+# Postfix specific configuration (no primary/backup - all servers are equal)
+
+# Service settings
+postfix_service: postfix
+
+# Rate limiting
+postfix_message_size_limit: 26214400
+postfix_smtpd_client_connection_rate_limit: 100
+postfix_smtpd_client_message_rate_limit: 30
+
+# Firewall
+configure_firewall: true
+
+# Enable/disable Rspamd for this Postfix server
+rspamd_enabled: true

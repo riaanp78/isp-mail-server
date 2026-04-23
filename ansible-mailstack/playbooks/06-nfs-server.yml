@@ -1,0 +1,92 @@
+---
+- name: Configure NFS server for mail storage
+  hosts: nfs_servers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install NFS server packages
+      ansible.builtin.apt:
+        name:
+          - nfs-kernel-server
+        state: present
+
+    - name: Ensure vmail group exists
+      ansible.builtin.group:
+        name: vmail
+        gid: "{{ vmail_gid }}"
+        state: present
+
+    - name: Ensure vmail user exists
+      ansible.builtin.user:
+        name: vmail
+        uid: "{{ vmail_uid }}"
+        group: vmail
+        home: "{{ nfs_export }}"
+        shell: /usr/sbin/nologin
+        state: present
+
+    - name: Create NFS export directory
+      ansible.builtin.file:
+        path: "{{ nfs_export }}"
+        state: directory
+        owner: vmail
+        group: vmail
+        mode: "0755"
+
+    - name: Remove existing export lines for this directory
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        regexp: "^{{ nfs_export }}"
+        state: absent
+      notify: restart nfs
+
+    - name: Configure NFS exports
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        line: "{{ nfs_export }} {{ internal_networks[0] }}(rw,sync,no_subtree_check,no_wdelay,no_root_squash,anonuid={{ vmail_uid }},anongid={{ vmail_gid }})"
+        state: present
+        create: yes
+      notify: restart nfs
+
+    - name: Export NFS shares
+      ansible.builtin.command:
+        cmd: exportfs -a
+      changed_when: false
+
+    - name: Configure firewall for NFS
+      ansible.builtin.ufw:
+        rule: allow
+        from: "{{ internal_networks[0] }}"
+        to: any
+        port: nfs
+        proto: tcp
+      when: configure_firewall | default(false)
+
+    - name: Verify NFS export
+      ansible.builtin.command:
+        cmd: showmount -e localhost
+      register: showmount_check
+      changed_when: false
+
+    - name: Display NFS export information
+      ansible.builtin.debug:
+        msg: "{{ showmount_check.stdout_lines }}"
+
+  handlers:
+    - name: restart nfs
+      ansible.builtin.systemd:
+        name: nfs-kernel-server
+        state: restarted
+
+  post_tasks:
+    - name: Display NFS server configuration summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ NFS Server Configuration Complete on {{ inventory_hostname }}"
+          - "============================================================"
+          - "NFS Export: {{ nfs_export }}"
+          - "Client Network: {{ internal_networks[0] }}"
+          - "vmail UID/GID: {{ vmail_uid }}/{{ vmail_gid }}"
+          - "============================================================"

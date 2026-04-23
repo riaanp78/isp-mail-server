@@ -1,0 +1,74 @@
+<?php
+$config['plugins'] = [];
+
+// IMAP connection options for self-signed certificates
+$config['imap_conn_options'] = [
+  'ssl' => [
+    'verify_peer'       => false,
+    'verify_peer_name'  => false,
+    'allow_self_signed' => true,
+  ],
+];
+$config['smtp_conn_options'] = [
+  'ssl' => [
+    'verify_peer'       => false,
+    'verify_peer_name'  => false,
+    'allow_self_signed' => true,
+  ],
+];
+
+// ============================================
+// MANAGESIEVE PLUGIN CONFIGURATION
+// ============================================
+$config['managesieve_host'] = '{{ dovecot_host }}';
+$config['managesieve_port'] = {{ dovecot_managesieve_port | default(4190) }};
+$config['managesieve_auth_type'] = 'LOGIN';
+$config['managesieve_usetls'] = false;
+$config['managesieve_conn_options'] = [
+  'ssl' => [
+    'verify_peer'       => false,
+    'verify_peer_name'  => false,
+    'allow_self_signed' => true,
+  ],
+];
+
+// ============================================
+// PASSWORD PLUGIN CONFIGURATION
+// ============================================
+
+// Enable password plugin
+$config['plugins'][] = 'password';
+
+// Use SQL driver
+$config['password_driver'] = 'sql';
+
+// Database connection for password changes
+$config['password_db_dsn'] = 'mysql://{{ db_user }}:{{ db_password }}@{{ mysql_host }}/{{ db_name }}';
+
+// **CRITICAL:** Use blowfish-crypt (bcrypt) algorithm.
+// This is the standard format for Dovecot (BLF-CRYPT).
+$config['password_algorithm'] = 'blowfish-crypt';
+
+// Set the cost for the bcrypt algorithm (Dovecot's default is 5, but 10 is a good balance)
+$config['password_algorithm_options'] = [
+    'cost' => 10,
+];
+
+// **CRITICAL:** Use the '%P' macro in your query.
+// Roundcube will automatically replace '%P' with the hashed password
+// based on the algorithm you specified above.
+$config['password_query'] = 'UPDATE mailbox SET password = %P WHERE username = %u';
+
+// Security settings
+$config['password_confirm_current'] = true;      // Require current password
+$config['password_minimum_length'] = 8;          // Minimum password length
+$config['password_log'] = true;                  // Log password changes
+$config['password_require_nonalpha'] = false;    // Don't require special characters
+$config['password_require_digit'] = false;       // Don't require numbers
+
+// Custom success message
+$config['password_change_success'] = 'Password successfully changed. Please log in with your new password.';
+
+
+ 
+ 

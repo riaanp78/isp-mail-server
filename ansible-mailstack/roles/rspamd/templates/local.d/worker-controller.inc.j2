@@ -1,0 +1,9 @@
+# Rspamd controller worker configuration
+# Managed by Ansible
+
+bind_socket = "{{ rspamd_bind_address }}:{{ rspamd_controller_port }}";
+password = "{{ rspamd_controller_password | default('') }}";
+enable_password = {{ 'true' if rspamd_controller_password | default('') | length > 0 else 'false' }};
+
+# Secure cookie for session management
+secure_ip = "{{ internal_networks | join(',') }}";

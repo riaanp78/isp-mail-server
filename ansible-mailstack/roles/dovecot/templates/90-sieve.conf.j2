@@ -1,0 +1,39 @@
+### Sieve Configuration (Native 2.4.3)
+# Based on: https://doc.dovecot.org/2.4.3/core/plugins/sieve.html
+
+# Enable Sieve plugin for LDA/LMTP protocols
+protocol lda {
+  mail_plugins {
+    sieve = yes
+  }
+}
+
+protocol lmtp {
+  mail_plugins {
+    sieve = yes
+  }
+}
+
+# Personal Sieve script storage
+sieve_script personal {
+  driver = file
+  path = ~/sieve
+  active_path = ~/.dovecot.sieve
+}
+
+# Default script when user has no personal script
+sieve_script default {
+  type = default
+  name = default
+  driver = file
+  path = /etc/dovecot/sieve/default.sieve
+}
+
+# Global limits
+sieve_max_script_size = {{ dovecot_sieve_max_script_size | default('1M') }}
+sieve_max_actions = {{ dovecot_sieve_max_actions | default(32) }}
+
+# ManageSieve service
+protocol managesieve {
+  managesieve_notify_capability = mailto
+}

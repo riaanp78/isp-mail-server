@@ -1,0 +1,9 @@
+### Native 2.4.3 Logging
+# Adapted from working external sample
+
+log_path = /var/log/dovecot.log
+info_log_path = /var/log/dovecot-info.log
+debug_log_path = /var/log/dovecot-debug.log
+
+auth_verbose = {{ dovecot_auth_verbose | default('yes') }}
+mail_debug = no

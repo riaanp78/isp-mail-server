@@ -1,0 +1,21 @@
+---
+# Default Valkey configuration
+valkey_role: "primary"  # primary, replica, sentinel, external, kubernetes
+valkey_install: true    # true = install locally, false = external config only
+
+# Connection settings
+valkey_host: "localhost"
+valkey_password: ""
+valkey_sentinel_hosts: []
+valkey_sentinel_port: 26379
+
+# Performance settings
+valkey_maxmemory: "512mb"
+valkey_maxmemory_policy: "allkeys-lru"
+valkey_timeout: 300
+valkey_tcp_keepalive: 60
+valkey_pool_size: 10
+
+# TLS settings (for Kubernetes)
+valkey_tls_enabled: false
+valkey_tls_ca_cert: ""

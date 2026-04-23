@@ -1,0 +1,32 @@
+---
+- name: Deploy Unbound DNS resolver for Rspamd
+  hosts: rspamd_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+  roles:
+    - unbound
+
+  post_tasks:
+    - name: Display Unbound deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ Unbound DNS Resolver Deployment Complete"
+          - "============================================================"
+          - "Server: {{ inventory_hostname }}"
+          - "DNS Listener: 127.0.0.1:53"
+          - "Forward Servers: {{ unbound_forward_servers | default(['Root servers']) | join(', ') }}"
+          - "Cache Size: {{ unbound_cache_size }}"
+          - "============================================================"
+          - "Verification commands:"
+          - "  dig @127.0.0.1 example.com"
+          - "  systemctl status unbound"
+          - "  unbound-control stats"
+          - "============================================================"

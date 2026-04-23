@@ -1,0 +1,162 @@
+---
+# Rspamd configuration defaults (only fallbacks - override in hosts.yml)
+rspamd_enabled: true
+rspamd_install: true
+
+# Connection settings (fallbacks - override in hosts.yml)
+rspamd_bind_address: "0.0.0.0"
+rspamd_controller_port: 11334
+rspamd_milter_port: 11332
+rspamd_proxy_port: 11333
+
+# Valkey backend (fallbacks - override in hosts.yml)
+# These should be defined in hosts.yml as the source of truth
+valkey_host: "localhost"
+valkey_port: 6379
+valkey_password: ""
+
+# Scanning settings (fallbacks)
+rspamd_reject_score: 15.0
+rspamd_add_header_score: 5.0
+rspamd_spam_subject: "***SPAM***"
+
+# Learning settings
+rspamd_bayes_min_learns: 200
+rspamd_bayes_min_ham: 200
+
+# Performance
+rspamd_worker_processes: 2
+rspamd_max_workers: 4
+
+# Default Attachment scan size
+clamav_max_file_size: 20000000
+
+# ============================================
+# RATELIMIT MODULE CONFIGURATION
+# ============================================
+
+# Enable/disable ratelimit module
+rspamd_ratelimit_enabled: true
+
+# Redis/Valkey servers - will be dynamically populated from inventory
+# Leave empty to auto-discover from valkey_servers group
+rspamd_ratelimit_servers: []
+
+# Global ratelimit settings
+rspamd_ratelimit_expire: "1d"
+rspamd_ratelimit_dynamic_rate_limit: true
+rspamd_ratelimit_prefilter: true
+rspamd_ratelimit_allow_local: false
+
+# Symbol mode: if set, tags mail with symbol instead of soft rejecting.
+# Leave empty (default) for production soft-reject behaviour.
+# rspamd_ratelimit_symbol: "R_RATELIMIT"
+
+# Dynamic adjustment factors
+rspamd_ratelimit_ham_factor_rate: 1.005
+rspamd_ratelimit_spam_factor_rate: 0.995
+rspamd_ratelimit_ham_factor_burst: 1.01
+rspamd_ratelimit_spam_factor_burst: 0.99
+rspamd_ratelimit_max_rate_mult: 5
+rspamd_ratelimit_max_bucket_mult: 10
+
+# ============================================
+# WHITELIST CONFIGURATION
+# ============================================
+
+rspamd_ratelimit_whitelist_ip_path: "/etc/rspamd/whitelist-ip.map"
+
+# UCL array - must be a list, not a comma-separated string
+rspamd_ratelimit_whitelisted_rcpts:
+  - "postmaster"
+  - "mailer-daemon"
+  - "abuse"
+  - "root"
+  - "monitoring"
+
+rspamd_ratelimit_internal_networks:
+  - "192.168.0.0/16"
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+
+rspamd_ratelimit_whitelist_all_inventory_hosts: true
+rspamd_ratelimit_additional_whitelist: []
+
+# ============================================
+# USER (AUTHENTICATED) RATE LIMITS
+# ============================================
+
+rspamd_ratelimit_user_enabled: true
+# 'user' is a valid v4 extractor
+rspamd_ratelimit_user_selector: "user.lower"
+rspamd_ratelimit_user_tiers:
+  - burst: 100
+    rate: "20 / 1min"
+    message: "Authenticated user per-minute limit exceeded"
+  - burst: 1000
+    rate: "500 / 1h"
+    message: "Authenticated user hourly limit exceeded"
+  - burst: 5000
+    rate: "5000 / 1d"
+    message: "Authenticated user daily limit exceeded"
+
+# ============================================
+# IP-BASED RATE LIMITS (Inbound)
+# ============================================
+
+rspamd_ratelimit_ip_enabled: true
+# 'ip' is a valid v4 extractor
+rspamd_ratelimit_ip_burst: 300
+rspamd_ratelimit_ip_rate: "1800 / 1h"
+rspamd_ratelimit_ip_message: "IP address sending too fast"
+
+# ============================================
+# RECIPIENT PROTECTION LIMITS (Inbound)
+# ============================================
+
+rspamd_ratelimit_recipient_enabled: true
+# 'to' is the correct v4 extractor for principal recipient
+rspamd_ratelimit_recipient_burst: 30
+rspamd_ratelimit_recipient_rate: "60 / 1h"
+rspamd_ratelimit_recipient_message: "Too many messages to this recipient"
+
+# ============================================
+# SENDER DOMAIN LIMITS
+# ============================================
+
+rspamd_ratelimit_domain_enabled: true
+# from() accepts 'smtp' or 'mime'; get_tld extracts domain
+rspamd_ratelimit_domain_burst: 500
+rspamd_ratelimit_domain_rate: "2000 / 1h"
+rspamd_ratelimit_domain_message: "Domain sending limit exceeded"
+
+# ============================================
+# BOUNCE/BACKSCATTER PROTECTION
+# ============================================
+
+rspamd_ratelimit_bounce_enabled: true
+# bounce_to is a predefined limit name in v4 - no selector needed
+# rspamd recognises: postmaster, mailer-daemon, '', null, fetchmail-daemon, mdaemon
+rspamd_ratelimit_bounce_burst: 5
+rspamd_ratelimit_bounce_rate: "6 / 1h"
+rspamd_ratelimit_bounce_message: "Bounce limit exceeded"
+
+# ============================================
+# PER-RECIPIENT + SENDER IP LIMITS
+# ============================================
+
+rspamd_ratelimit_to_ip_enabled: true
+# to_ip is a predefined limit name in v4 - no selector needed
+rspamd_ratelimit_to_ip_burst: 60
+rspamd_ratelimit_to_ip_rate: "120 / 1h"
+rspamd_ratelimit_to_ip_message: "Too many messages from this IP to this recipient"
+
+# ============================================
+# CONNECTION RATE LIMITS (Anti-DoS)
+# Disabled by default - duplicate of ip_limit, use with caution
+# ============================================
+
+rspamd_ratelimit_connection_enabled: false
+rspamd_ratelimit_connection_burst: 10
+rspamd_ratelimit_connection_rate: "60 / 1min"
+rspamd_ratelimit_connection_message: "Connection rate limit exceeded"

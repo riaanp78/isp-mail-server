@@ -1,0 +1,9 @@
+---
+- name: restart roundcube
+  ansible.builtin.systemd:
+    name: docker-roundcube
+    state: restarted
+    daemon_reload: true
+  ignore_errors: true
+
+ 

@@ -1,0 +1,72 @@
+# Symbol groups and weights – Rspamd 4.x
+# Managed by Ansible
+
+symbols {
+  # SPF symbols (Rspamd 4 names)
+  "R_SPF_PASS" {
+    weight = -0.5;
+    description = "SPF check passed";
+  }
+  "R_SPF_NEUTRAL" {
+    weight = 0.0;
+    description = "SPF neutral";
+  }
+  "R_SPF_SOFTFAIL" {
+    weight = 2.0;
+    description = "SPF softfail";
+  }
+  "R_SPF_FAIL" {
+    weight = 8.0;
+    description = "SPF fail";
+  }
+  "R_SPF_TEMP_ERROR" {
+    weight = 1.0;
+    description = "SPF temporary error";
+  }
+  "R_SPF_PERM_ERROR" {
+    weight = 1.0;
+    description = "SPF permanent error";
+  }
+
+  # DKIM symbols
+  "R_DKIM_PASS" {
+    weight = -0.5;
+    description = "DKIM signature valid";
+  }
+  "R_DKIM_FAIL" {
+    weight = 8.0;
+    description = "DKIM signature invalid";
+  }
+  "R_DKIM_TEMP_ERROR" {
+    weight = 1.0;
+    description = "DKIM temporary error";
+  }
+  "R_DKIM_PERM_ERROR" {
+    weight = 1.0;
+    description = "DKIM permanent error";
+  }
+
+  # DMARC symbols
+  "DMARC_POLICY_ALLOW" {
+    weight = -0.5;
+    description = "DMARC policy allowed";
+  }
+  "DMARC_POLICY_REJECT" {
+    weight = 8.0;
+    description = "DMARC policy reject";
+  }
+  "DMARC_POLICY_QUARANTINE" {
+    weight = 4.0;
+    description = "DMARC policy quarantine";
+  }
+  "DMARC_POLICY_SOFTFAIL" {
+    weight = 1.0;
+    description = "DMARC policy softfail";
+  }
+
+  # ClamAV (existing)
+  "CLAMAV_VIRUS" {
+    weight = 20.0;
+    description = "Virus detected by ClamAV";
+  }
+}

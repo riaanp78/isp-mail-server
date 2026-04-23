@@ -1,0 +1,23 @@
+---
+- name: Deploy Dovecot 2.4 on dedicated host
+  hosts: dovecot_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - openssl
+          - ca-certificates
+          - python3-mysqldb
+          - ufw
+        state: present
+
+  roles:
+    - dovecot

@@ -1,0 +1,49 @@
+---
+# Node Exporter handler
+- name: restart node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: restarted
+    daemon_reload: true
+
+# Postfix Exporter handler (updated service name)
+- name: restart postfix-exporter
+  ansible.builtin.systemd:
+    name: postfix_exporter
+    state: restarted
+    daemon_reload: true
+
+# MySQL Exporter handler
+- name: restart mysqld-exporter
+  ansible.builtin.systemd:
+    name: prometheus-mysqld-exporter
+    state: restarted
+
+# Valkey/Redis Exporter handler
+- name: restart redis-exporter
+  ansible.builtin.systemd:
+    name: prometheus-redis-exporter
+    state: restarted
+    daemon_reload: true
+
+# Monitoring stack handler (Prometheus + Grafana)
+- name: restart monitoring-stack
+  ansible.builtin.systemd:
+    name: monitoring-stack
+    state: restarted
+    daemon_reload: true
+
+# Unbound Exporter handler
+- name: restart unbound-exporter
+  ansible.builtin.systemd:
+    name: unbound_exporter
+    state: restarted
+    daemon_reload: true
+
+# ClamAV Exporter handler (ADD THIS)
+- name: restart clamav-exporter
+  ansible.builtin.systemd:
+    name: clamav_exporter
+    state: restarted
+    daemon_reload: true
+    

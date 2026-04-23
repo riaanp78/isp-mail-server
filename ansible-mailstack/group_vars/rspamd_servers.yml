@@ -1,0 +1,6 @@
+---
+# Rspamd scoring thresholds
+rspamd_reject_score: 15.0
+#rspamd_add_header_score: -100 # always add headers
+rspamd_add_header_score: 3.0
+rspamd_greylist_score: 4.0

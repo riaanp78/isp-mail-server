@@ -1,0 +1,13 @@
+# DMARC configuration – Rspamd 4.x
+enabled = true;
+reports = true;
+reporting_domain = "{{ mail_domain }}";
+reporting_email = "dmarc-reports@{{ mail_domain }}";
+
+redis {
+  servers = "{{ valkey_host }}:{{ valkey_port }}";
+  {% if valkey_password | length > 0 %}
+  password = "{{ valkey_password }}";
+  {% endif %}
+}
+ignore_failures = true;

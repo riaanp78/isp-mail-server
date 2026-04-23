@@ -1,0 +1,17 @@
+---
+- name: Deploy Node Exporter to all mail servers
+  hosts: 
+    - mysql_servers
+    - dovecot_servers
+    - postfix_servers
+    - valkey_servers
+    - rspamd_servers
+    - clamav_servers
+    - roundcube_servers
+    #- postfixadmin_servers
+    - nfs_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - monitoring_node

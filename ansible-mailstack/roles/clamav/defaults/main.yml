@@ -1,0 +1,18 @@
+---
+# ClamAV configuration
+clamav_install: true
+
+# ClamAV daemon settings
+clamav_bind_address: "0.0.0.0"
+clamav_port: 3310
+clamav_max_connections: 50
+clamav_max_file_size: 200M
+clamav_max_recursion: 16
+
+# Freshclam (virus database updater) settings
+clamav_db_update_interval: 12  # hours
+clamav_db_mirror: "database.clamav.net"
+
+# Rspamd integration
+rspamd_host: "{{ groups['rspamd_servers'][0] | default('127.0.0.1') }}"
+rspamd_clamav_enabled: true

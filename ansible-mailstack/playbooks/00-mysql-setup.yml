@@ -1,0 +1,12 @@
+---
+- name: Provision Mailstack Databases and Users
+  hosts: mysql_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: mysql_setup
+      # Ensures logic runs exactly once for the group
+      run_once: true
+      # Ensures logic executes physically on the primary DB node
+      delegate_to: "{{ groups['mysql_servers'][0] }}"

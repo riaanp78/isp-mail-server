@@ -1,0 +1,23 @@
+---
+# Postfix package names
+postfix_packages:
+  - postfix
+  - postfix-mysql
+  - postfix-pcre
+  - postfix-doc
+  - sasl2-bin
+  - libsasl2-modules
+  - libsasl2-modules-sql
+  - rsyslog
+
+# Service name
+postfix_service: postfix
+
+# Configuration paths
+postfix_conf_dir: /etc/postfix
+postfix_main_cf: "{{ postfix_conf_dir }}/main.cf"
+postfix_master_cf: "{{ postfix_conf_dir }}/master.cf"
+
+# Default settings
+postfix_default_uid: 5001
+postfix_default_gid: 5001

@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Rspamd 4.x Global Options - DNS Configuration
+# Documentation: https://docs.rspamd.com/configuration/options.html
+
+dns {
+  # Use the local Unbound resolver for all DNS queries
+  nameserver = ["127.0.0.1:{{ unbound_port | default(5354) }}:10"];
+
+  # DNS query timeout (default: 1s)
+  timeout = 2s;
+
+  # Number of retransmits (default: 5)
+  retransmits = 5;
+
+  # Number of sockets per nameserver (default: 16)
+  sockets = 32;
+}

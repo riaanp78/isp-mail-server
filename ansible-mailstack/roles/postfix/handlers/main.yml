@@ -1,0 +1,16 @@
+---
+- name: restart postfix
+  ansible.builtin.systemd:
+    name: postfix
+    state: restarted
+    daemon_reload: yes
+
+- name: reload postfix
+  ansible.builtin.systemd:
+    name: postfix
+    state: reloaded
+
+- name: restart rsyslog
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: restarted

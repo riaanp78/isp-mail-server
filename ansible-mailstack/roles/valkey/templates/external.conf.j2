@@ -1,0 +1,26 @@
+# External Valkey/Sentinel Configuration
+# Managed by Ansible - DO NOT EDIT MANUALLY
+# Generated: {{ ansible_date_time.iso8601 }}
+
+# Connection type: {{ valkey_role }}
+# This configuration is for applications that need to connect to
+# an externally managed Valkey cluster (e.g., Kubernetes)
+
+{% if valkey_role == 'sentinel' or valkey_role == 'kubernetes' %}
+# Sentinel mode configuration
+sentinel_enabled = true
+sentinel_hosts = {{ valkey_sentinel_hosts | default([valkey_host + ':' + (valkey_sentinel_port | default('26379'))]) | join(',') }}
+{% else %}
+# Direct connection mode
+host = {{ valkey_host }}
+port = {{ valkey_port }}
+{% endif %}
+
+# Authentication (if required)
+{% if valkey_password | length > 0 %}
+password = {{ valkey_password }}
+{% endif %}
+
+# Connection pool settings
+pool_size = {{ valkey_pool_size | default(10) }}
+timeout = {{ valkey_timeout | default(5) }}

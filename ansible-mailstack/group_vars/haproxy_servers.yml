@@ -1,0 +1,82 @@
+---
+# HAProxy configuration
+haproxy_version: "2.8"
+haproxy_stats_port: 8404
+haproxy_stats_user: "admin"
+haproxy_stats_password: "CHANGE_ME_HAPROXY_PASSWORD"
+
+# SSL termination
+haproxy_ssl_termination: true
+haproxy_ssl_cert_path: "/etc/ssl/haproxy/haproxy.pem"
+
+# Performance
+haproxy_backend_maxconn: 4096
+haproxy_maxconn_per_ip: 50
+haproxy_maxconn_rate: 1000
+
+# Health checks
+haproxy_health_check_interval: "5s"
+haproxy_health_check_fall: 3
+haproxy_health_check_rise: 2
+
+# Sticky session
+haproxy_cookie_name: "MAILSTACK"
+haproxy_cookie_dynamic: true
+
+# Timeouts
+haproxy_timeout_connect: "10s"
+haproxy_timeout_client: "30s"
+haproxy_timeout_server: "30s"
+haproxy_timeout_queue: "30s"
+haproxy_timeout_tunnel: "1h"
+
+# Firewall
+configure_firewall: true
+
+# Backend servers (dynamically from inventory)
+# These are auto-discovered from inventory groups
+haproxy_backends:
+  dovecot:
+    group: "dovecot_servers"
+    port_imap: 143
+    port_imaps: 993
+    port_lmtp: 24
+    port_sasl: 12345
+    port_managesieve: 4190
+    balance: "source"
+    sticky: true
+    
+  postfix:
+    group: "postfix_servers"
+    port_smtp: 25
+    port_smtps: 465
+    port_submission: 587
+    balance: "roundrobin"
+    sticky: false
+    
+  roundcube:
+    group: "roundcube_servers"
+    port: 80
+    balance: "roundrobin"
+    sticky: true
+    cookie: true
+    
+  rspamd:
+    group: "rspamd_servers"
+    port: 11334
+    balance: "roundrobin"
+    sticky: false
+    
+  valkey:
+    group: "valkey_servers"
+    port: 6379
+    balance: "roundrobin"
+    sticky: false
+    
+  clamav:
+    group: "clamav_servers"
+    port: 3310
+    balance: "roundrobin"
+    sticky: false
+
+    

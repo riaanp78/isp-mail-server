@@ -1,0 +1,189 @@
+---
+# Determine if ClamAV should be installed
+- name: Determine ClamAV operation mode
+  ansible.builtin.set_fact:
+    clamav_install_required: "{{ clamav_install | default(true) | bool }}"
+
+# ============================================
+# INSTALLATION
+# ============================================
+- block:
+    - name: Install ClamAV packages
+      ansible.builtin.apt:
+        name:
+          - clamav
+          - clamav-daemon
+          - clamav-freshclam
+        state: present
+        update_cache: true
+
+    - name: Ensure ClamAV configuration directory exists
+      ansible.builtin.file:
+        path: /etc/clamav
+        state: directory
+        owner: clamav
+        group: clamav
+        mode: "0755"
+
+    - name: Ensure ClamAV log directory exists
+      ansible.builtin.file:
+        path: /var/log/clamav
+        state: directory
+        owner: clamav
+        group: clamav
+        mode: "0755"
+
+    - name: Ensure ClamAV run directory exists
+      ansible.builtin.file:
+        path: /var/run/clamav
+        state: directory
+        owner: clamav
+        group: clamav
+        mode: "0755"
+
+    - name: Ensure ClamAV database directory exists
+      ansible.builtin.file:
+        path: /var/lib/clamav
+        state: directory
+        owner: clamav
+        group: clamav
+        mode: "0755"
+
+    - name: Configure ClamAV daemon
+      ansible.builtin.template:
+        src: clamd.conf.j2
+        dest: /etc/clamav/clamd.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: restart clamav-daemon
+
+    - name: Configure Freshclam
+      ansible.builtin.template:
+        src: freshclam.conf.j2
+        dest: /etc/clamav/freshclam.conf
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Disable systemd socket activation (prevents socket overriding TCPSocket)
+      ansible.builtin.systemd:
+        name: clamav-daemon.socket
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Unmask the socket (required for daemon to start)
+      ansible.builtin.command:
+        cmd: systemctl unmask clamav-daemon.socket
+      register: unmask_socket
+      changed_when: "'Removed symlink' in unmask_socket.stdout"
+      ignore_errors: true
+
+    - name: Ensure socket stays disabled
+      ansible.builtin.systemd:
+        name: clamav-daemon.socket
+        enabled: false
+      ignore_errors: true
+
+    - name: Stop freshclam service if running
+      ansible.builtin.systemd:
+        name: clamav-freshclam
+        state: stopped
+      ignore_errors: true
+
+    - name: Remove old log file to prevent lock issues
+      ansible.builtin.file:
+        path: /var/log/clamav/freshclam.log
+        state: absent
+      ignore_errors: true
+
+    - name: Create freshclam log file
+      ansible.builtin.file:
+        path: /var/log/clamav/freshclam.log
+        state: touch
+        owner: clamav
+        group: clamav
+        mode: "0644"
+
+    - name: Update virus database
+      ansible.builtin.command:
+        cmd: freshclam --stdout
+      register: freshclam_update
+      changed_when: "'Downloading' in freshclam_update.stdout"
+
+    - name: Start and enable ClamAV services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      loop:
+        - clamav-freshclam
+        - clamav-daemon
+
+    - name: Wait for ClamAV to be ready
+      ansible.builtin.wait_for:
+        port: "{{ clamav_port }}"
+        host: "{{ clamav_bind_address }}"
+        timeout: 60
+
+  when: clamav_install_required
+
+# ============================================
+# VERIFICATION
+# ============================================
+
+- name: Create EICAR test file
+  ansible.builtin.copy:
+    content: |
+      X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*
+    dest: /tmp/eicar.com
+    mode: "0644"
+
+- name: Test ClamAV with EICAR test virus
+  ansible.builtin.command:
+    cmd: clamdscan /tmp/eicar.com
+  register: virus_test
+  changed_when: false
+  ignore_errors: true
+  failed_when: false
+
+- name: Remove EICAR test file
+  ansible.builtin.file:
+    path: /tmp/eicar.com
+    state: absent
+
+- name: Display ClamAV test result
+  ansible.builtin.debug:
+    msg: "ClamAV virus test: {{ 'FOUND (working)' if 'FOUND' in virus_test.stdout
+      else 'NOT FOUND' }}"
+
+- name: Check ClamAV status
+  ansible.builtin.systemd:
+    name: clamav-daemon
+    state: started
+  register: clamav_status
+  changed_when: false
+
+- name: Display ClamAV deployment summary
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      ✅ ClamAV Deployment Complete on {{ inventory_hostname }}
+      ============================================================
+      ClamAV Listener: {{ clamav_bind_address }}:{{ clamav_port }}
+      Max File Size: {{ clamav_max_file_size }}
+      Socket Activation: Disabled (clamd manages TCP)
+      Service Status: {{ clamav_status.status.ActiveState }}
+      ============================================================
+      Test result: {{ '✅ VIRUS DETECTION WORKING' if 'FOUND' in virus_test.stdout else '❌ TEST FAILED' }}
+      ============================================================
+      Verification commands:
+        clamdscan --version
+        systemctl status clamav-daemon
+        systemctl status clamav-freshclam
+        ss -tlnp | grep {{ clamav_port }}
+        nc -zv {{ clamav_bind_address }} {{ clamav_port }}
+        tail -f /var/log/clamav/clamav.log
+      ============================================================

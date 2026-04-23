@@ -1,0 +1,173 @@
+# Managed by Ansible - DO NOT EDIT MANUALLY
+# Generated: {{ ansible_date_time.iso8601 }}
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporters (system metrics for all mail servers)
+  - job_name: 'node'
+    static_configs:
+      - targets:
+{% for host in groups['monitoring_targets'] | default([]) %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9100'
+{% endif %}
+{% endfor %}
+
+# DOVECOT 
+
+{% if dovecot_exporter | default(false) %}
+  # Dovecot metrics (built-in OpenMetrics)
+  - job_name: 'dovecot'
+    static_configs:
+      - targets:
+{% for host in groups['dovecot_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9900'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+
+# RSPAMD
+
+{% if rspamd_exporter | default(false) %}
+  # Rspamd metrics (built-in Prometheus endpoint)
+  - job_name: 'rspamd'
+    static_configs:
+      - targets:
+{% for host in groups['rspamd_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:11334'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# MYSQL 
+
+{% if mysql_exporter | default(false) %}
+  # MySQL metrics
+  - job_name: 'mysql'
+    static_configs:
+      - targets:
+{% for host in groups['mysql_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9104'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# VALKEY
+
+{% if valkey_redis_exporter | default(false) %}
+  # Valkey/Redis metrics
+  - job_name: 'valkey'
+    static_configs:
+      - targets:
+{% for host in groups['valkey_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9121'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# UNBOUND
+
+{% if unbound_exporter | default(false) %}
+  # Unbound DNS metrics
+  - job_name: 'unbound'
+    static_configs:
+      - targets:
+{% for host in groups['rspamd_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9167'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+
+# CLAMAV
+
+{% if clamav_exporter | default(false) %}
+  # ClamAV metrics
+  - job_name: 'clamav'
+    static_configs:
+      - targets:
+{% for host in groups['clamav_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9155'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# ROUNDCUBE
+
+{% if roundcube_exporter | default(false) %}
+  # Roundcube metrics
+  - job_name: 'roundcube'
+    static_configs:
+      - targets:
+{% for host in groups['roundcube_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9168'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# POSTFIXADMIN
+
+{% if postfixadmin_exporter | default(false) %}
+  # PostfixAdmin metrics
+  - job_name: 'postfixadmin'
+    static_configs:
+      - targets:
+{% for host in groups['postfixadmin_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9169'
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# NFS (using node_exporter's NFS collector)
+# NFS metrics are collected by node_exporter - no separate exporter needed
+# NFS servers are already in monitoring_targets group for node_exporter
+
+
+# POSTFIX
+
+{% if postfix_exporter | default(false) %}
+  # Postfix metrics
+  - job_name: 'postfix'
+    static_configs:
+      - targets:
+{% for host in groups['postfix_servers'] %}
+{% set host_ip = hostvars[host]['ansible_host'] if 'ansible_host' in hostvars[host] else None %}
+{% if host_ip and host_ip != 'unknown' %}
+        - '{{ host_ip }}:9154'
+{% endif %}
+{% endfor %}
+    # No relabel_configs needed - job name is already 'postfix'
+{% endif %}

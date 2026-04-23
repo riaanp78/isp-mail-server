@@ -1,0 +1,8 @@
+sql_driver = mysql
+
+mysql {{ db_host }} {
+  user = {{ db_user }}
+  password = {{ db_password }}
+  dbname = {{ db_name }}
+  port = {{ db_port | default(3306) }}
+}

@@ -1,0 +1,37 @@
+---
+- name: Deploy Rspamd spam filter
+  hosts: rspamd_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - curl
+          - wget
+          - gnupg
+        state: present
+
+  roles:
+    - rspamd
+
+  post_tasks:
+    - name: Flush handlers to ensure services restart
+      ansible.builtin.meta: flush_handlers
+
+    - name: Display Rspamd deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ Rspamd Deployment Complete on {{ inventory_hostname }}"
+          - "============================================================"
+          - "Controller UI: http://{{ ansible_host }}:{{ rspamd_controller_port }}"
+          - "Milter Port: {{ rspamd_milter_port }}"
+          - "Valkey Backend: {{ valkey_host }}:{{ valkey_port }}"
+          - "============================================================"

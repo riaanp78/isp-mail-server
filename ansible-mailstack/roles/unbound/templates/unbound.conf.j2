@@ -1,0 +1,80 @@
+# Unbound DNS Resolver Configuration - Recursive Mode
+# Managed by Ansible for MailStack
+# Uses root servers directly (no forwarding)
+# LISTENING on port {{ unbound_port }} - DO NOT CHANGE
+
+server:
+    # Local listening configuration (STAYS on port {{ unbound_port }})
+    interface: 127.0.0.1
+    port: {{ unbound_port | default(5354) }}
+    do-ip4: yes
+    do-ip6: {{ 'yes' if unbound_ipv6_enabled | default(false) else 'no' }}
+    do-udp: yes
+    do-tcp: yes
+    
+    # CRITICAL FIX: Do NOT specify outgoing-interface
+    # Let the kernel choose source IP and random high ports
+    # This prevents Unbound from using {{ unbound_port }} as source port
+    
+    # Outgoing port configuration - EXCLUDE our listening port
+    outgoing-port-permit: 32768-65535
+    outgoing-port-avoid: {{ unbound_port | default(5354) }}
+    outgoing-port-avoid: 0-1023
+    
+    # Root hints (explicit for reliability)
+    root-hints: /usr/share/dns/root.hints
+    
+    # Access control
+    access-control: 127.0.0.0/8 allow
+    {% for net in internal_networks | default(['192.168.1.0/24']) %}
+    access-control: {{ net }} allow
+    {% endfor %}
+    
+    # Security
+    hide-identity: yes
+    hide-version: yes
+    
+    # Cache settings
+    cache-min-ttl: {{ unbound_cache_min_ttl | default(3600) }}
+    cache-max-ttl: {{ unbound_cache_max_ttl | default(86400) }}
+    rrset-cache-size: {{ unbound_cache_size | default('256m') }}
+    msg-cache-size: {{ unbound_cache_size | default('256m') }}
+    
+    # Prefetch (keep enabled - subnetcache is disabled)
+    prefetch: yes
+    prefetch-key: yes
+    
+    # Performance tuning
+    num-threads: {{ unbound_num_threads | default(2) }}
+    outgoing-range: 4096
+    num-queries-per-thread: 1024
+    so-rcvbuf: 1m
+    
+    # DNS settings - smaller buffer to avoid fragmentation issues
+    edns-buffer-size: 1232
+    max-udp-size: 1232
+    
+    # Timeouts for recursive resolution
+    infra-host-ttl: 900
+    infra-cache-numhosts: 10000
+    
+    # Logging
+    verbosity: {{ unbound_verbosity | default(1) }}
+    extended-statistics: yes
+    statistics-interval: 0
+
+# CRITICAL: Disable subnetcache module to allow prefetch without warnings
+# Module order: validator (DNSSEC) then iterator (recursive resolution)
+module-config: "validator iterator"
+
+# Remote control for statistics
+remote-control:
+    control-enable: yes
+    control-interface: 127.0.0.1
+    control-port: 8953
+    control-use-cert: no
+    control-interface: /run/unbound.ctl
+
+
+
+

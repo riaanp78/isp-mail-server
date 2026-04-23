@@ -1,0 +1,6 @@
+# MySQL virtual domains map
+user = {{ db_user }}
+password = {{ db_password }}
+hosts = {{ db_host }}
+dbname = {{ db_name }}
+query = SELECT domain FROM domain WHERE domain='%s' AND active='1'

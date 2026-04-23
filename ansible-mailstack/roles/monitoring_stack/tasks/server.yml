@@ -1,0 +1,316 @@
+---
+# ============================================
+# PREREQUISITES
+# ============================================
+
+- name: Install Docker prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: yes
+
+- name: Add Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add Docker repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+
+- name: Install Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: Ensure Docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+# ============================================
+# CREATE DIRECTORIES
+# ============================================
+
+- name: Create monitoring directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('65534') }}"
+    group: "{{ item.group | default('65534') }}"
+    mode: "0755"
+    recurse: yes
+  loop:
+    - { path: "{{ prometheus_data_dir }}", owner: "65534", group: "65534" }
+    - { path: "{{ grafana_data_dir }}", owner: "472", group: "472" }
+    - { path: "{{ prometheus_config_dir }}", owner: "65534", group: "65534" }
+    - { path: "{{ monitoring_base_dir }}/provisioning/datasources", owner: "472", group: "472" }
+    - { path: "{{ monitoring_base_dir }}/provisioning/dashboards/json", owner: "472", group: "472" }
+
+# ============================================
+# DEPLOY CONFIGURATIONS
+# ============================================
+
+- name: Deploy Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ prometheus_config_dir }}/prometheus.yml"
+    owner: "65534"
+    group: "65534"
+    mode: "0644"
+  notify: restart monitoring-stack
+
+- name: Deploy Grafana datasource configuration
+  ansible.builtin.template:
+    src: grafana-datasources.yml.j2
+    dest: "{{ monitoring_base_dir }}/provisioning/datasources/prometheus.yml"
+    owner: "472"
+    group: "472"
+    mode: "0644"
+  notify: restart monitoring-stack
+
+- name: Deploy dashboard provisioning configuration
+  ansible.builtin.template:
+    src: grafana-dashboards.yml.j2
+    dest: "{{ monitoring_base_dir }}/provisioning/dashboards/dashboards.yml"
+    owner: "472"
+    group: "472"
+    mode: "0644"
+  notify: restart monitoring-stack
+
+- name: Deploy docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ monitoring_base_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+# ============================================
+# DASHBOARD MANAGEMENT
+# ============================================
+
+- name: Copy dashboard JSON files from local
+  ansible.builtin.copy:
+    src: "dashboards/{{ item }}"
+    dest: "{{ monitoring_base_dir }}/provisioning/dashboards/json/{{ item }}"
+    owner: "472"
+    group: "472"
+    mode: "0644"
+  loop: "{{ grafana_dashboards }}"
+  when: grafana_dashboards is defined
+  notify: restart monitoring-stack
+
+- name: Find existing dashboards on remote
+  ansible.builtin.find:
+    paths: "{{ monitoring_base_dir }}/provisioning/dashboards/json"
+    patterns: "*.json"
+  register: remote_dashboards
+  when: grafana_dashboards is defined
+
+- name: Remove dashboards not in local list
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ remote_dashboards.files }}"
+  when:
+    - grafana_dashboards is defined
+    - (item.path | basename) not in grafana_dashboards
+  notify: restart monitoring-stack
+
+# ============================================
+# PULL DOCKER IMAGES
+# ============================================
+
+- name: Pull Docker images
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: "{{ monitoring_base_dir }}"
+  register: pull_result
+  changed_when: pull_result.rc == 0
+
+- name: Verify images are pulled
+  ansible.builtin.command:
+    cmd: docker images --format "table {{ '{{' }}.Repository{{ '}}' }}\t{{ '{{' }}.Tag{{ '}}' }}\t{{ '{{' }}.Size{{ '}}' }}"
+  register: images_list
+  changed_when: false
+
+- name: Display pulled images
+  ansible.builtin.debug:
+    msg: "{{ images_list.stdout_lines }}"
+
+# ============================================
+# START DOCKER COMPOSE STACK
+# ============================================
+
+- name: Run docker compose up -d
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ monitoring_base_dir }}"
+  register: compose_up
+  changed_when: compose_up.rc == 0
+
+- name: Display compose output
+  ansible.builtin.debug:
+    msg: "{{ compose_up.stdout_lines }}"
+  when: compose_up.stdout_lines | length > 0
+
+# ============================================
+# CREATE SYSTEMD SERVICE
+# ============================================
+
+- name: Deploy systemd service for monitoring stack
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/monitoring-stack.service
+    content: |
+      [Unit]
+      Description=Monitoring Stack (Prometheus + Grafana)
+      Requires=docker.service
+      After=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory={{ monitoring_base_dir }}
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose down
+      ExecReload=/usr/bin/docker compose restart
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart monitoring-stack
+
+- name: Enable monitoring-stack service
+  ansible.builtin.systemd:
+    name: monitoring-stack
+    enabled: yes
+    daemon_reload: yes
+
+# ============================================
+# WAIT FOR SERVICES
+# ============================================
+
+- name: Wait for Prometheus to be ready
+  ansible.builtin.wait_for:
+    port: "{{ prometheus_port }}"
+    host: "0.0.0.0"
+    timeout: 120
+
+- name: Wait for Grafana to be ready
+  ansible.builtin.wait_for:
+    port: "{{ grafana_port }}"
+    host: "0.0.0.0"
+    timeout: 120
+
+# ============================================
+# FIREWALL
+# ============================================
+
+- name: Allow monitoring ports in UFW
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "{{ prometheus_port }}"
+    - "{{ grafana_port }}"
+  when: configure_firewall | default(false)
+
+# ============================================
+# WAIT FOR GRAFANA API
+# ============================================
+
+- name: Wait for Grafana API to be responsive
+  ansible.builtin.uri:
+    url: "http://localhost:{{ grafana_port }}/api/health"
+    status_code: 200
+  register: grafana_health
+  retries: 30
+  delay: 5
+  until: grafana_health.status == 200
+
+# ============================================
+# RELOAD PROMETHEUS CONFIGURATION
+# ============================================
+
+- name: Reload Prometheus configuration
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prometheus_port }}/-/reload"
+    method: POST
+    status_code: 200
+  changed_when: false
+  register: reload_result
+  until: reload_result.status == 200
+  retries: 3
+  delay: 2
+  ignore_errors: true
+
+# ============================================
+# VERIFICATION
+# ============================================
+
+- name: Verify Prometheus is responding
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prometheus_port }}/-/ready"
+    status_code: 200
+  register: prometheus_check
+  ignore_errors: true
+
+- name: Verify Grafana is responding
+  ansible.builtin.uri:
+    url: "http://localhost:{{ grafana_port }}/api/health"
+    status_code: 200
+  register: grafana_check
+  ignore_errors: true
+
+# ============================================
+# SHOW RUNNING CONTAINERS
+# ============================================
+
+- name: Show running containers
+  ansible.builtin.command:
+    cmd: docker ps --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Ports{{ '}}' }}"
+  register: docker_ps
+  changed_when: false
+
+- name: Display running containers
+  ansible.builtin.debug:
+    msg: "{{ docker_ps.stdout_lines }}"
+
+# ============================================
+# STACK INFO
+# ============================================
+
+- name: Display monitoring stack status
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "✅ Monitoring Stack Deployment Complete"
+      - "============================================================"
+      - "Prometheus: http://{{ ansible_host }}:{{ prometheus_port }}"
+      - "Grafana: http://{{ ansible_host }}:{{ grafana_port }}"
+      - "Grafana Login: {{ grafana_admin_user }} / {{ grafana_admin_password }}"
+      - "============================================================"
+      - "Dashboard Directory: {{ monitoring_base_dir }}/provisioning/dashboards/json"
+      - "To add a dashboard: Copy JSON file to the above directory"
+      - "To remove a dashboard: Delete the JSON file"
+      - "============================================================"
+      - "Status:"
+      - "  Prometheus: {{ '✅ Running' if prometheus_check.status == 200 else '❌ Not Responding' }}"
+      - "  Grafana: {{ '✅ Running' if grafana_check.status == 200 else '❌ Not Responding' }}"
+      - "============================================================"

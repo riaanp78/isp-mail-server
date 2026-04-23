@@ -1,0 +1,67 @@
+---
+# Node Exporter version
+node_exporter_version: "1.11.1"
+
+# Postfix exporter version (sergeymakinen/postfix_exporter)
+postfix_exporter_version: "2.1.0"
+
+# Postfix exporter version (sergeymakinen/clamav_exporter)
+clamav_exporter_version: "2.1.2"
+
+# Unbound exporter version
+unbound_exporter_version: "0.4.2"
+
+# Prometheus and Grafana versions
+prometheus_version: "latest"
+grafana_version: "latest"
+
+# Ports
+prometheus_port: 9090
+grafana_port: 3000
+
+# Data directories
+monitoring_base_dir: /opt/monitoring
+prometheus_data_dir: "{{ monitoring_base_dir }}/prometheus"
+grafana_data_dir: "{{ monitoring_base_dir }}/grafana"
+prometheus_config_dir: "{{ monitoring_base_dir }}/prometheus/config"
+
+# Grafana admin credentials
+grafana_admin_user: admin
+grafana_admin_password: "CHANGE_ME_GRAFANA_PASSWORD"
+
+# Retention
+prometheus_retention_days: 15
+prometheus_retention_size: "50GB"
+
+# Exporters enable/disable
+# Dovecot exposes metrics on port 9900 - no additional exporter needed
+# Rspamd exposes metrics on port 11334 - no additional exporter needed
+dovecot_exporter: true
+rspamd_exporter: true
+postfix_exporter: true
+valkey_redis_exporter: true
+unbound_exporter: true
+clamav_exporter: true
+
+
+roundcube_exporter: false
+
+## Optional Exporters 
+mysql_exporter: false
+
+nfs_exporter: false
+
+# List of dashboard JSON files to deploy
+grafana_dashboards:
+  - Dovecot.json
+  - Node_Exporter_Dashboard.json
+  - Node_Exporter_Full.json
+  - Postfix.json
+  - Rspamd_4.json
+  - Unbound_RSPAMD.json
+  - Valkey.json
+  - ClamAV.json
+
+# Set to true to download community dashboards
+download_community_dashboards: false
+

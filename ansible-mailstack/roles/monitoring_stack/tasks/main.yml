@@ -1,0 +1,144 @@
+---
+# ============================================
+# DEPLOY ALL EXPORTERS TO MAIL SERVERS
+# ============================================
+
+- name: Deploy all exporters to mail servers
+  ansible.builtin.include_tasks: exporters.yml
+  when: inventory_hostname in groups['monitoring_targets']
+
+# ============================================
+# NODE EXPORTER DEPLOYMENT TO MAIL SERVERS
+# ============================================
+
+- name: Check if node_exporter is already installed
+  ansible.builtin.shell: |
+    node_exporter --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+  register: current_node_version
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in groups['monitoring_targets'] | default([])
+
+- name: Display current node_exporter version
+  ansible.builtin.debug:
+    msg: "Current node_exporter version: {{ current_node_version.stdout | default('Not installed') }}"
+  when: inventory_hostname in groups['monitoring_targets'] | default([])
+
+- name: Set node_exporter needs install flag
+  ansible.builtin.set_fact:
+    node_exporter_needs_install: "{{ current_node_version.stdout == '' or node_exporter_version not in current_node_version.stdout }}"
+  when: inventory_hostname in groups['monitoring_targets'] | default([])
+
+- name: Create node_exporter group
+  ansible.builtin.group:
+    name: node_exporter
+    system: yes
+    state: present
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Create node_exporter system user
+  ansible.builtin.user:
+    name: node_exporter
+    system: yes
+    shell: /usr/sbin/nologin
+    create_home: no
+    group: node_exporter
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Download node_exporter binary
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Extract node_exporter binary
+  ansible.builtin.unarchive:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp
+    remote_src: yes
+    creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Install node_exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: yes
+  notify: restart node_exporter
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Clean up node_exporter temporary files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Create node_exporter systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus Node Exporter
+      After=network.target
+
+      [Service]
+      User=node_exporter
+      Group=node_exporter
+      Type=simple
+      ExecStart=/usr/local/bin/node_exporter \
+        --web.listen-address=:9100 \
+        --collector.systemd \
+        --collector.tcpstat \
+        --collector.processes
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart node_exporter
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+    - node_exporter_needs_install | default(false)
+
+- name: Enable and start node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: 
+    - inventory_hostname in groups['monitoring_targets'] | default([])
+
+- name: Display node_exporter install status
+  ansible.builtin.debug:
+    msg: "Node Exporter on {{ inventory_hostname }}: {{ 'installed/upgraded' if (node_exporter_needs_install | default(false)) else 'already up to date (version ' + current_node_version.stdout + ')' }}"
+  when: inventory_hostname in groups['monitoring_targets'] | default([])
+
+# ============================================
+# DEPLOY PROMETHEUS AND GRAFANA TO MONITORING SERVER
+# ============================================
+
+- name: Deploy Prometheus and Grafana to monitoring server
+  ansible.builtin.include_tasks: server.yml
+  when: inventory_hostname in groups['monitoring_server']
+
+  

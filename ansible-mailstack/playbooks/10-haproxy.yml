@@ -1,0 +1,171 @@
+---
+- name: Deploy HAProxy Load Balancer for MailStack
+  hosts: haproxy_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - openssl
+          - ca-certificates
+          - ufw
+          - socat
+          - rsyslog
+        state: present
+
+  roles:
+    - haproxy
+
+  post_tasks:
+    - name: Flush handlers to ensure services restart
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for HAProxy to be ready
+      ansible.builtin.wait_for:
+        port: "{{ haproxy_stats_port }}"
+        host: "127.0.0.1"
+        timeout: 30
+
+    - name: Test HAProxy configuration
+      ansible.builtin.command:
+        cmd: haproxy -c -f /etc/haproxy/haproxy.cfg
+      register: config_test
+      changed_when: false
+
+    - name: Display HAProxy config test result
+      ansible.builtin.debug:
+        msg: "HAProxy configuration is valid"
+      when: config_test.rc == 0
+
+    - name: Test stats page locally
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ haproxy_stats_port }}/stats"
+        status_code: 200
+        user: "{{ haproxy_stats_user }}"
+        password: "{{ haproxy_stats_password }}"
+        force_basic_auth: yes
+      register: stats_test
+      ignore_errors: true
+
+    - name: Test external ports are listening
+      ansible.builtin.wait_for:
+        port: "{{ item }}"
+        host: "0.0.0.0"
+        timeout: 10
+      loop:
+        - 25
+        - 465
+        - 587
+        - 143
+        - 993
+        - 4190
+        - 80
+        - 443
+      ignore_errors: true
+
+    - name: Check backend server counts
+      ansible.builtin.set_fact:
+        dovecot_count: "{{ groups['dovecot_servers'] | length }}"
+        postfix_count: "{{ groups['postfix_servers'] | length }}"
+        roundcube_count: "{{ groups['roundcube_servers'] | length }}"
+        rspamd_count: "{{ groups['rspamd_servers'] | length }}"
+        valkey_count: "{{ groups['valkey_servers'] | length }}"
+        clamav_count: "{{ groups['clamav_servers'] | length }}"
+
+    - name: Display backend server counts
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Backend Server Counts:"
+          - "  Dovecot:  {{ dovecot_count }} server(s)"
+          - "  Postfix:  {{ postfix_count }} server(s)"
+          - "  Roundcube: {{ roundcube_count }} server(s)"
+          - "  Rspamd:   {{ rspamd_count }} server(s)"
+          - "  Valkey:   {{ valkey_count }} server(s)"
+          - "  ClamAV:   {{ clamav_count }} server(s)"
+          - "============================================================"
+
+    - name: Check HAProxy service status
+      ansible.builtin.systemd:
+        name: haproxy
+      register: haproxy_status
+
+    - name: Display HAProxy deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ HAProxy Deployment Complete"
+          - "============================================================"
+          - "HAProxy Server: {{ ansible_host }}"
+          - "Service Status: {{ haproxy_status.status.ActiveState }}"
+          - "============================================================"
+          - "🔒 STATS PAGE (Localhost Only - Secure):"
+          - "  URL: http://127.0.0.1:{{ haproxy_stats_port }}/stats"
+          - "  Login: {{ haproxy_stats_user }} / {{ haproxy_stats_password }}"
+          - "  Access via SSH tunnel: ssh -L 8404:127.0.0.1:8404 {{ ansible_host
+            }}"
+          - "============================================================"
+          - "🌐 EXTERNAL PORTS (Internet-facing):"
+          - "  SMTP:        25, 465, 587"
+          - "  IMAP:        143, 993"
+          - "  ManageSieve: 4190"
+          - "  Webmail:     80, 443"
+          - "============================================================"
+          - "📊 Backend Servers:"
+          - "  Dovecot:  {{ dovecot_count }} server(s) - Sticky by source IP"
+          - "  Postfix:  {{ postfix_count }} server(s) - Round-robin"
+          - "  Roundcube: {{ roundcube_count }} server(s) - Cookie-based sticky"
+          - "  Rspamd:   {{ rspamd_count }} server(s) - Round-robin"
+          - "  Valkey:   {{ valkey_count }} server(s) - Round-robin"
+          - "  ClamAV:   {{ clamav_count }} server(s) - Round-robin"
+          - "============================================================"
+          - "🔧 Useful Commands:"
+          - "  Check config:  haproxy -c -f /etc/haproxy/haproxy.cfg"
+          - "  Reload:        systemctl reload haproxy"
+          - "  Stats socket:  echo 'show stat' | socat stdio
+            /run/haproxy/admin.sock"
+          - "============================================================"
+          - "📈 Stats accessible: {{ '✅ Yes' if stats_test.status == 200 else '❌
+            No' }}"
+          - "============================================================"
+
+    - name: Save HAProxy configuration summary
+      ansible.builtin.copy:
+        content: |
+          # HAProxy Deployment Summary
+          # Generated: {{ ansible_date_time.iso8601 }}
+
+          HAPROXY_SERVER={{ ansible_host }}
+          STATS_PORT={{ haproxy_stats_port }}
+          STATS_USER={{ haproxy_stats_user }}
+          SERVICE_STATUS={{ haproxy_status.status.ActiveState }}
+          DOVECOT_SERVERS={{ dovecot_count }}
+          POSTFIX_SERVERS={{ postfix_count }}
+          ROUNDCUBE_SERVERS={{ roundcube_count }}
+          RSPAMD_SERVERS={{ rspamd_count }}
+          VALKEY_SERVERS={{ valkey_count }}
+          CLAMAV_SERVERS={{ clamav_count }}
+        dest: "/root/haproxy-summary-{{ ansible_date_time.epoch }}.txt"
+        mode: "0600"
+
+    - name: Display warning if no backend servers found
+      ansible.builtin.debug:
+        msg: |
+          ⚠️ WARNING: No backend servers found for some services!
+          - Dovecot: {{ dovecot_count }} servers (minimum 1 required)
+          - Postfix: {{ postfix_count }} servers (minimum 1 required)
+
+          Please ensure backend servers are deployed before HAProxy.
+      when: dovecot_count == 0 or postfix_count == 0
+
+    - name: Fail if critical backends are missing
+      ansible.builtin.fail:
+        msg: "No Dovecot or Postfix backend servers found. Please deploy these first."
+      when: dovecot_count == 0 or postfix_count == 0

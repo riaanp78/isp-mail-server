@@ -1,0 +1,37 @@
+### Native 2.4.3 Mail Storage
+
+# Mailbox format driver
+mail_driver = maildir
+
+# Path to mail storage (absolute path)
+mail_path = /var/vmail/%{user|domain}/%{user|username}/Maildir
+
+# Permissions
+mail_uid = {{ vmail_uid }}
+mail_gid = {{ vmail_gid }}
+
+# Index files on local storage (not NFS)
+mail_index_path = /var/indexes/%{user|domain}/%{user|username}
+mail_volatile_path = /dev/shm/dovecot/%{user|domain}/%{user|username}
+
+namespace inbox {
+  inbox = yes
+  separator = /
+  
+  mailbox Drafts {
+    special_use = \Drafts
+    auto = subscribe
+  }
+  mailbox Junk {
+    special_use = \Junk
+    auto = subscribe
+  }
+  mailbox Trash {
+    special_use = \Trash
+    auto = subscribe
+  }
+  mailbox Sent {
+    special_use = \Sent
+    auto = subscribe
+  }
+}

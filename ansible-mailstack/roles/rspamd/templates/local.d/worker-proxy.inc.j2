@@ -1,0 +1,11 @@
+# Rspamd proxy worker configuration (Milter)
+# Managed by Ansible
+
+bind_socket = "*:{{ rspamd_milter_port }}";
+milter = yes;
+timeout = 120s;
+
+upstream "scan" {
+  default = yes;
+  self_scan = yes;
+}

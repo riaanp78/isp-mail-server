@@ -1,0 +1,139 @@
+---
+# Determine if Unbound should be installed (only on Rspamd servers)
+- name: Determine Unbound operation mode
+  ansible.builtin.set_fact:
+    unbound_install_required: "{{ unbound_install | default(true) | bool }}"
+
+# ============================================
+# INSTALLATION
+# ============================================
+- block:
+    - name: Install Unbound packages
+      ansible.builtin.apt:
+        name:
+          - unbound
+          - dnsutils
+          - dns-root-data  # Add root hints package
+        state: present
+        update_cache: yes
+
+    - name: Ensure Unbound configuration directory exists
+      ansible.builtin.file:
+        path: /etc/unbound
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # FIX: Add DAEMON_OPTS to default file to suppress warning
+    - name: Fix DAEMON_OPTS warning in Unbound defaults
+      ansible.builtin.lineinfile:
+        path: /etc/default/unbound
+        regexp: '^DAEMON_OPTS='
+        line: 'DAEMON_OPTS=""'
+        create: yes
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Create Unbound configuration from template
+      ansible.builtin.template:
+        src: unbound.conf.j2
+        dest: /etc/unbound/unbound.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: restart unbound
+
+    - name: Validate Unbound configuration
+      ansible.builtin.command:
+        cmd: unbound-checkconf
+      register: config_check
+      changed_when: false
+
+    - name: Fail if config is invalid
+      ansible.builtin.fail:
+        msg: "Unbound configuration is invalid: {{ config_check.stderr }}"
+      when: config_check.rc != 0
+
+    - name: Start and enable Unbound
+      ansible.builtin.systemd:
+        name: unbound
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Wait for Unbound to be ready
+      ansible.builtin.wait_for:
+        port: "{{ unbound_port | default(5354) }}"
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Test Unbound DNS resolution
+      ansible.builtin.command:
+        cmd: "dig @127.0.0.1 -p {{ unbound_port | default(5354) }} google.com +short"
+      register: dns_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display DNS test result
+      ansible.builtin.debug:
+        msg: "Unbound DNS test: {{ dns_test.stdout_lines | default(['Failed (dig not available)']) }}"
+
+  when: unbound_install_required
+
+# ============================================
+# CONFIGURE RSPAMD TO USE UNBOUND
+# ============================================
+
+- name: Create Rspamd DNS configuration directory
+  ansible.builtin.file:
+    path: /etc/rspamd/local.d
+    state: directory
+    owner: _rspamd
+    group: _rspamd
+    mode: "0755"
+  when: unbound_install_required
+
+- name: Configure Rspamd to use local Unbound
+  ansible.builtin.copy:
+    content: |
+      # DNS configuration for Rspamd
+      # Use local Unbound resolver on port {{ unbound_port | default(5354) }}
+      nameserver = "127.0.0.1:{{ unbound_port | default(5354) }}";
+      dns_timeout = 2s;
+      dns_retransmits = 3;
+      
+      # Enable DNS caching
+      dns_cache_size = 10000;
+      dns_cache_max_ttl = 3600;
+    dest: /etc/rspamd/local.d/dns.conf
+    owner: _rspamd
+    group: _rspamd
+    mode: "0644"
+  notify: restart rspamd
+  when: unbound_install_required
+
+# ============================================
+# STATUS DISPLAY
+# ============================================
+
+- name: Check Unbound listening port
+  ansible.builtin.command:
+    cmd: "ss -tlnp | grep {{ unbound_port | default(5354) }}"
+  register: port_check
+  changed_when: false
+  failed_when: false
+
+- name: Display Unbound status
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Unbound DNS Resolver Status
+      ============================================================
+      Mode: Recursive (Root servers - no forwarding)
+      Listen Port: {{ unbound_port | default(5354) }}
+      Cache Size: {{ unbound_cache_size | default('256m') }}
+      Subnetcache: Disabled (prefetch enabled)
+      DAEMON_OPTS: Fixed
+      ============================================================

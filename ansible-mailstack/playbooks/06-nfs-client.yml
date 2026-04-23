@@ -1,0 +1,150 @@
+---
+- name: Configure NFS clients for mail servers
+  hosts: dovecot_servers, postfix_servers, rspamd_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+  tasks:
+    - name: Install NFS client packages
+      ansible.builtin.apt:
+        name:
+          - nfs-common
+          - keyutils
+        state: present
+
+    - name: Ensure vmail group exists
+      ansible.builtin.group:
+        name: vmail
+        gid: "{{ vmail_gid }}"
+        state: present
+
+    - name: Ensure vmail user exists
+      ansible.builtin.user:
+        name: vmail
+        uid: "{{ vmail_uid }}"
+        group: vmail
+        home: "{{ vmail_home }}"
+        shell: /usr/sbin/nologin
+        state: present
+        create_home: no
+
+    - name: Create mount point directory
+      ansible.builtin.file:
+        path: "{{ vmail_home }}"
+        state: directory
+        owner: "{{ vmail_uid }}"
+        group: "{{ vmail_gid }}"
+        mode: "0755"
+
+    - name: Check if NFS server is reachable
+      ansible.builtin.shell: |
+        rpcinfo -p {{ nfs_host }} 2>/dev/null | grep -q nfs
+      register: nfs_port_check
+      failed_when: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display NFS server reachability
+      ansible.builtin.debug:
+        msg: "NFS server {{ nfs_host }} is {{ 'reachable' if nfs_port_check.rc == 0 else 'NOT reachable' }}"
+
+    - name: Mount NFS share (if server reachable)
+      ansible.builtin.mount:
+        path: "{{ vmail_home }}"
+        src: "{{ nfs_host }}:{{ nfs_export }}"
+        fstype: nfs
+        opts: "{{ nfs_mount_options }}"
+        state: mounted
+        dump: 0
+        passno: 0
+      when: nfs_port_check.rc == 0
+      register: mount_result
+
+    - name: Add NFS mount to fstab (for persistence)
+      ansible.builtin.mount:
+        path: "{{ vmail_home }}"
+        src: "{{ nfs_host }}:{{ nfs_export }}"
+        fstype: nfs
+        opts: "{{ nfs_mount_options }}"
+        state: present
+        dump: 0
+        passno: 0
+      when: nfs_port_check.rc == 0
+
+    - name: Verify mount (if server reachable)
+      when: nfs_port_check.rc == 0
+      block:
+        - name: Check mountpoint
+          ansible.builtin.command:
+            cmd: "mountpoint {{ vmail_home }}"
+          register: mount_check
+          changed_when: false
+
+        - name: Display mount information
+          ansible.builtin.command:
+            cmd: "df -h {{ vmail_home }}"
+          register: df_check
+          changed_when: false
+
+        - name: Show mount details
+          ansible.builtin.debug:
+            msg: "{{ df_check.stdout_lines }}"
+
+        - name: Test write permissions as vmail user
+          ansible.builtin.shell: |
+            sudo -u vmail touch {{ vmail_home }}/test_from_{{ inventory_hostname }} 2>&1
+          register: write_test
+          changed_when: false
+          failed_when: false
+
+        - name: Display write test result
+          ansible.builtin.debug:
+            msg: |
+              {% if write_test.rc == 0 %}
+              ✅ Write test successful on {{ inventory_hostname }}
+              {% else %}
+              ❌ Write test failed on {{ inventory_hostname }}: {{ write_test.stderr }}
+              {% endif %}
+
+        - name: Clean up test files
+          ansible.builtin.file:
+            path: "{{ vmail_home }}/test_from_{{ inventory_hostname }}"
+            state: absent
+          when: write_test.rc == 0
+          ignore_errors: true
+
+    - name: Verify UID/GID consistency
+      ansible.builtin.command:
+        cmd: "id vmail"
+      register: id_check
+      changed_when: false
+
+    - name: Display UID/GID information
+      ansible.builtin.debug:
+        msg: "{{ id_check.stdout_lines }}"
+
+  post_tasks:
+    - name: Display NFS client configuration summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ NFS Client Configuration Complete on {{ inventory_hostname }}"
+          - "============================================================"
+          - "NFS Server: {{ nfs_host }}"
+          - "NFS Export: {{ nfs_export }}"
+          - "Mount Point: {{ vmail_home }}"
+          - "Mount Options: {{ nfs_mount_options }}"
+          - "vmail UID/GID: {{ vmail_uid }}/{{ vmail_gid }}"
+          - "============================================================"
+          - "Verification commands:"
+          - "  df -h {{ vmail_home }}"
+          - "  mount | grep {{ vmail_home }}"
+          - "  sudo -u vmail touch {{ vmail_home }}/test"
+          - "  rpcinfo -p {{ nfs_host }}"
+          - "============================================================"

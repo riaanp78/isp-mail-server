@@ -1,0 +1,19 @@
+---
+- name: Deploy Complete Mail Stack
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: mysql
+      when: inventory_hostname in groups['mysql_servers']
+    - role: dovecot
+      when: inventory_hostname in groups['dovecot_servers']
+    - role: postfix
+      when: inventory_hostname in groups['postfix_servers']
+    - role: valkey
+      when: inventory_hostname in groups['valkey_servers']
+    - role: nfs_client
+      when: inventory_hostname in groups['dovecot_servers'] or inventory_hostname in groups['postfix_servers']
+    - role: roundcube
+      when: inventory_hostname in groups['roundcube_servers']

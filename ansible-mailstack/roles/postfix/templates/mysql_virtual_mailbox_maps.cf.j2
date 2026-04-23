@@ -1,0 +1,6 @@
+# MySQL virtual mailbox map
+user = {{ db_user }}
+password = {{ db_password }}
+hosts = {{ db_host }}
+dbname = {{ db_name }}
+query = SELECT CONCAT(domain, '/', local_part, '/') FROM mailbox WHERE username='%s' AND active='1'

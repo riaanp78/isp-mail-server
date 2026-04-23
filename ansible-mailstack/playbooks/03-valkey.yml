@@ -1,0 +1,27 @@
+---
+- name: Deploy Valkey for Rspamd backend
+  hosts: valkey_servers
+  become: true
+  gather_facts: true
+  
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+  roles:
+    - valkey
+
+  post_tasks:
+    - name: Display Valkey deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ Valkey Deployment Complete on {{ inventory_hostname }}"
+          - "============================================================"
+          - "Valkey Host: {{ valkey_host | default(inventory_hostname) }}"
+          - "Valkey Port: {{ valkey_port }}"
+          - "Max Memory: {{ valkey_maxmemory }}"
+          - "Eviction Policy: {{ valkey_maxmemory_policy }}"
+          - "============================================================"

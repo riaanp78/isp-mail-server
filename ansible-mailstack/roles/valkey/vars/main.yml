@@ -1,0 +1,9 @@
+---
+# Valkey default configuration values
+valkey_port: 6379
+valkey_sentinel_port: 26379
+valkey_maxmemory: "512mb"
+valkey_maxmemory_policy: "allkeys-lru"
+valkey_timeout: 300
+valkey_tcp_keepalive: 60
+valkey_pool_size: 10

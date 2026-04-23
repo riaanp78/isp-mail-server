@@ -1,0 +1,6 @@
+# Rspamd normal worker configuration
+# Managed by Ansible
+
+bind_socket = "{{ rspamd_bind_address }}:{{ rspamd_proxy_port }}";
+count = {{ rspamd_worker_processes }};
+

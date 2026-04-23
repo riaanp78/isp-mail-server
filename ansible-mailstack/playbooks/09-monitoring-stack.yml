@@ -1,0 +1,9 @@
+---
+- name: Deploy Full Monitoring Stack
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - monitoring_stack
+    

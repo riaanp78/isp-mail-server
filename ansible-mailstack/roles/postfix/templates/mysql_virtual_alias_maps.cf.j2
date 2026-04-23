@@ -1,0 +1,6 @@
+# MySQL virtual alias map
+user = {{ db_user }}
+password = {{ db_password }}
+hosts = {{ db_host }}
+dbname = {{ db_name }}
+query = SELECT goto FROM alias WHERE address='%s' AND active='1'

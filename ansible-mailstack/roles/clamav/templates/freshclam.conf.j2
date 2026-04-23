@@ -1,0 +1,19 @@
+# Freshclam Configuration
+# Managed by Ansible for MailStack
+
+DatabaseDirectory /var/lib/clamav
+UpdateLogFile /var/log/clamav/freshclam.log
+LogTime yes
+LogVerbose no
+
+# Check for updates every {{ clamav_db_update_interval }} hours
+Checks {{ (24 / clamav_db_update_interval) | int }}
+
+DatabaseMirror {{ clamav_db_mirror }}
+
+# Notify ClamAV after update
+NotifyClamd /etc/clamav/clamd.conf
+
+# Download limits
+MaxAttempts 3
+ScriptedUpdates yes

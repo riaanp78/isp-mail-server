@@ -1,0 +1,73 @@
+# Postfix master.cf
+# ==========================================================================
+# service type  private unpriv  chroot  wakeup  maxproc command + args
+# ==========================================================================
+smtp      inet  n       -       y       -       1       postscreen
+smtpd     pass  -       -       y       -       -       smtpd
+dnsblog   unix  -       -       y       -       0       dnsblog
+tlsproxy  unix  -       -       y       -       0       tlsproxy
+
+# Outgoing SMTP transport (REQUIRED to send mail to external domains)
+smtp      unix  -       -       y       -       -       smtp
+
+# LMTP client (REQUIRED for lmtp:inet transport)
+lmtp      unix  -       -       y       -       -       lmtp
+
+# Submission (port 587) - with SASL and Rspamd milter
+submission inet n       -       y       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject_unauth_destination
+{% if rspamd_enabled | default(false) %}
+  -o smtpd_milters=inet:{{ rspamd_host }}:{{ rspamd_milter_port }}
+{% endif %}
+
+# SMTPS (port 465)
+smtps     inet  n       -       y       -       -       smtpd
+  -o syslog_name=postfix/smtps
+  -o smtpd_tls_wrappermode=yes
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+{% if rspamd_enabled | default(false) %}
+  -o smtpd_milters=inet:{{ rspamd_host }}:{{ rspamd_milter_port }}
+{% endif %}
+
+# Pickup and cleanup
+pickup    unix  n       -       y       60      1       pickup
+cleanup   unix  n       -       y       -       0       cleanup
+qmgr      unix  n       -       n       300     1       qmgr
+tlsmgr    unix  -       -       y       1000?   1       tlsmgr
+
+# Rewrite, bounce, defer, trace
+rewrite   unix  -       -       y       -       -       trivial-rewrite
+bounce    unix  -       -       y       -       0       bounce
+defer     unix  -       -       y       -       0       bounce
+trace     unix  -       -       y       -       0       bounce
+verify    unix  -       -       y       -       1       verify
+
+# Local delivery (disabled)
+local     unix  -       n       n       -       -       local
+  -o local_transport=error:local delivery disabled
+
+# Error, retry, discard, flush
+error     unix  -       -       y       -       -       error
+retry     unix  -       -       y       -       -       error
+discard   unix  -       -       y       -       -       discard
+flush     unix  n       -       y       1000?   0       flush
+
+# Showq, proxymap, anvil, scache
+showq     unix  n       -       y       -       -       showq
+proxymap  unix  -       -       n       -       -       proxymap
+anvil     unix  -       -       y       -       1       anvil
+scache    unix  -       -       y       -       1       scache
+
+# Postlog service (required for Postfix 3.5+)
+postlog   unix-dgram n  -       n       -       1       postlogd
+
+# Relay transport
+relay     unix  -       -       n       -       -       smtp
+

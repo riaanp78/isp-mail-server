@@ -1,0 +1,13 @@
+---
+# MySQL specific configuration
+mysql_version: "8.0"
+mysql_datadir: "/var/lib/mysql"
+mysql_socket: "/var/run/mysqld/mysqld.sock"
+
+# Performance tuning
+mysql_innodb_buffer_pool_size: "2G"
+mysql_max_connections: 500
+
+# Backup
+mysql_backup_retention_days: 7
+mysql_backup_time: "02:00"

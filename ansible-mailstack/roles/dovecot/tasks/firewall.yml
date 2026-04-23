@@ -1,0 +1,46 @@
+---
+- name: Check if UFW is installed
+  ansible.builtin.command: which ufw
+  register: ufw_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Install UFW if not present
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+  when: ufw_check.rc != 0
+
+- name: Ensure SSH is allowed
+  ansible.builtin.ufw:
+    rule: allow
+    port: "22"
+    proto: "tcp"
+
+- name: Configure UFW for Dovecot services
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: "tcp"
+  loop:
+    - 143 # IMAP
+    - 993 # IMAPS
+    - 110 # POP3
+    - 995 # POP3S
+    - 4190 # ManageSieve
+    - 24 # LMTP
+    - 12345 # SASL auth
+    - 9090 # Director communication (NEW)
+    - 9900 # Director communication (NEW)
+
+- name: Enable UFW
+  ansible.builtin.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+
+- name: Verify SSH is still accessible
+  ansible.builtin.wait_for:
+    port: 22
+    host: "{{ ansible_host }}"
+    timeout: 10

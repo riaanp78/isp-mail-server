@@ -1,0 +1,145 @@
+# {{ ansible_managed }}
+# Rspamd 4.x Ratelimit Module Configuration
+# Tuned for 100,000+ emails/day production environment
+
+# Redis/Valkey backend configuration
+servers = [
+{% set valkey_hosts = [] %}
+{% for host in groups.get('valkey_servers', []) %}
+{%   if hostvars[host].ansible_host is defined %}
+{%     set _ = valkey_hosts.append(hostvars[host].ansible_host ~ ':' ~ (hostvars[host].valkey_port | default(6379))) %}
+{%   endif %}
+{% endfor %}
+{% for server in valkey_hosts %}
+  "{{ server }}"{% if not loop.last %},{% endif %}
+
+{% endfor %}
+];
+{% if rspamd_ratelimit_valkey_password | default(valkey_password) | default('') | length > 0 %}
+password = "{{ rspamd_ratelimit_valkey_password | default(valkey_password) }}";
+{% endif %}
+
+# Global settings
+expire = {{ rspamd_ratelimit_expire | default('1d') }};
+dynamic_rate_limit = {{ rspamd_ratelimit_dynamic_rate_limit | default(true) | lower }};
+prefilter = {{ rspamd_ratelimit_prefilter | default(true) | lower }};
+allow_local = {{ rspamd_ratelimit_allow_local | default(false) | lower }};
+
+# Dynamic adjustment factors
+ham_factor_rate = {{ rspamd_ratelimit_ham_factor_rate | default(1.005) }};
+spam_factor_rate = {{ rspamd_ratelimit_spam_factor_rate | default(0.995) }};
+ham_factor_burst = {{ rspamd_ratelimit_ham_factor_burst | default(1.01) }};
+spam_factor_burst = {{ rspamd_ratelimit_spam_factor_burst | default(0.99) }};
+max_rate_mult = {{ rspamd_ratelimit_max_rate_mult | default(5) }};
+max_bucket_mult = {{ rspamd_ratelimit_max_bucket_mult | default(10) }};
+
+{% if rspamd_ratelimit_symbol | default('') | length > 0 %}
+# Symbol mode - tags mail instead of soft rejecting
+symbol = "{{ rspamd_ratelimit_symbol }}";
+{% endif %}
+
+# Whitelist configuration
+whitelisted_ip = "{{ rspamd_ratelimit_whitelist_ip_path | default('/etc/rspamd/whitelist-ip.map') }}";
+whitelisted_rcpts = [{{ rspamd_ratelimit_whitelisted_rcpts | default(['postmaster', 'mailer-daemon', 'abuse', 'root', 'monitoring']) | map('to_json') | join(', ') }}];
+
+rates {
+
+{% if rspamd_ratelimit_user_enabled | default(true) %}
+  # ============================================
+  # AUTHENTICATED USERS (Outgoing mail)
+  # selector 'user' is a registered extractor in v4
+  # ============================================
+  user_limit = {
+    selector = "user.lower";
+    bucket = [
+{% for tier in rspamd_ratelimit_user_tiers | default([
+      {'burst': 100,  'rate': '20 / 1min', 'message': 'Authenticated user per-minute limit exceeded'},
+      {'burst': 1000, 'rate': '500 / 1h',  'message': 'Authenticated user hourly limit exceeded'},
+      {'burst': 5000, 'rate': '5000 / 1d', 'message': 'Authenticated user daily limit exceeded'}
+    ]) %}
+      {
+        burst = {{ tier.burst }};
+        rate = "{{ tier.rate }}";
+        message = "{{ tier.message }}";
+      }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+    ];
+  }
+{% endif %}
+
+{% if rspamd_ratelimit_ip_enabled | default(true) %}
+  # ============================================
+  # INBOUND BY IP (Spam prevention)
+  # selector 'ip' is a registered extractor in v4
+  # ============================================
+  ip_limit = {
+    selector = "ip";
+    bucket = {
+      burst = {{ rspamd_ratelimit_ip_burst | default(300) }};
+      rate = "{{ rspamd_ratelimit_ip_rate | default('1800 / 1h') }}";
+      message = "{{ rspamd_ratelimit_ip_message | default('IP address sending too fast') }}";
+    }
+  }
+{% endif %}
+
+{% if rspamd_ratelimit_recipient_enabled | default(true) %}
+  # ============================================
+  # RECIPIENT PROTECTION (Inbound)
+  # selector 'to' is a registered extractor in v4
+  # ============================================
+  to_limit = {
+    selector = "to.lower";
+    bucket = {
+      burst = {{ rspamd_ratelimit_recipient_burst | default(30) }};
+      rate = "{{ rspamd_ratelimit_recipient_rate | default('60 / 1h') }}";
+      message = "{{ rspamd_ratelimit_recipient_message | default('Too many messages to this recipient') }}";
+    }
+  }
+{% endif %}
+
+{% if rspamd_ratelimit_domain_enabled | default(true) %}
+  # ============================================
+  # SENDER DOMAIN LIMITS
+  # from() takes 'smtp' or 'mime' arg; get_tld strips to domain
+  # ============================================
+  from_domain = {
+    selector = "from('smtp').lower.get_tld";
+    bucket = {
+      burst = {{ rspamd_ratelimit_domain_burst | default(500) }};
+      rate = "{{ rspamd_ratelimit_domain_rate | default('2000 / 1h') }}";
+      message = "{{ rspamd_ratelimit_domain_message | default('Domain sending limit exceeded') }}";
+    }
+  }
+{% endif %}
+
+{% if rspamd_ratelimit_bounce_enabled | default(true) %}
+  # ============================================
+  # BOUNCE/BACKSCATTER PROTECTION
+  # bounce_to is a predefined limit name in v4 - no selector needed
+  # rspamd recognises: postmaster, mailer-daemon, '', null, fetchmail-daemon, mdaemon
+  # ============================================
+  bounce_to = {
+    bucket = {
+      burst = {{ rspamd_ratelimit_bounce_burst | default(5) }};
+      rate = "{{ rspamd_ratelimit_bounce_rate | default('6 / 1h') }}";
+      message = "{{ rspamd_ratelimit_bounce_message | default('Bounce limit exceeded') }}";
+    }
+  }
+{% endif %}
+
+{% if rspamd_ratelimit_to_ip_enabled | default(true) %}
+  # ============================================
+  # PER-RECIPIENT + IP
+  # to_ip is a predefined limit name in v4 - no selector needed
+  # ============================================
+  to_ip = {
+    bucket = {
+      burst = {{ rspamd_ratelimit_to_ip_burst | default(60) }};
+      rate = "{{ rspamd_ratelimit_to_ip_rate | default('120 / 1h') }}";
+      message = "{{ rspamd_ratelimit_to_ip_message | default('Too many messages from this IP to this recipient') }}";
+    }
+  }
+{% endif %}
+
+}

@@ -1,0 +1,163 @@
+---
+- name: Install HAProxy packages
+  ansible.builtin.apt:
+    name:
+      - haproxy
+      - rsyslog
+      - socat
+    state: present
+    update_cache: yes
+
+- name: Create SSL directory for HAProxy
+  ansible.builtin.file:
+    path: "{{ haproxy_ssl_cert_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Generate self-signed certificate for HAProxy
+  when: haproxy_ssl_termination
+  block:
+    - name: Generate private key
+      ansible.builtin.command:
+        cmd: "openssl genrsa -out {{ haproxy_ssl_cert_path | replace('.pem', '.key') }}
+          2048"
+        creates: "{{ haproxy_ssl_cert_path | replace('.pem', '.key') }}"
+
+    - name: Generate self-signed certificate
+      ansible.builtin.command:
+        cmd: "openssl req -x509 -new -nodes -key {{ haproxy_ssl_cert_path |
+          replace('.pem', '.key') }} -days 365 -out {{ haproxy_ssl_cert_path |
+          replace('.pem', '.crt') }} -subj '/CN={{ mail_hostname }}'"
+        creates: "{{ haproxy_ssl_cert_path | replace('.pem', '.crt') }}"
+
+    - name: Combine key and cert into PEM file
+      ansible.builtin.shell: |
+        cat {{ haproxy_ssl_cert_path | replace('.pem', '.key') }} \
+            {{ haproxy_ssl_cert_path | replace('.pem', '.crt') }} \
+            > {{ haproxy_ssl_cert_path }}
+      args:
+        creates: "{{ haproxy_ssl_cert_path }}"
+
+- name: Configure rsyslog for HAProxy
+  ansible.builtin.copy:
+    dest: /etc/rsyslog.d/49-haproxy.conf
+    content: |
+      $AddUnixListenSocket /var/lib/haproxy/dev/log
+      local2.*    /var/log/haproxy.log
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart rsyslog
+
+- name: Create HAProxy log file
+  ansible.builtin.file:
+    path: /var/log/haproxy.log
+    state: touch
+    owner: haproxy
+    group: adm
+    mode: "0640"
+
+- name: Deploy HAProxy configuration
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload haproxy
+
+- name: Enable and start HAProxy
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+# ============================================
+# FIREWALL CONFIGURATION (STRICT)
+# ============================================
+
+- name: Ensure SSH is always allowed FIRST
+  ansible.builtin.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from: "0.0.0.0/0"
+
+- name: Configure UFW for HAProxy - External ports (internet facing)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    from: "0.0.0.0/0"
+  loop: "{{ haproxy_external_ports }}"
+  when: configure_firewall | default(false)
+
+- name: Configure UFW for HAProxy - Internal ports (only internal network)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    from: "{{ internal_networks[0] }}"
+  loop: "{{ haproxy_internal_ports }}"
+  when: configure_firewall | default(false)
+
+- name: Configure UFW for stats page - localhost only
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ haproxy_stats_port }}"
+    proto: tcp
+    from: "127.0.0.1"
+  when: configure_firewall | default(false)
+
+- name: Enable UFW if not already enabled
+  ansible.builtin.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  when: configure_firewall | default(false)
+
+- name: Verify SSH is still accessible
+  ansible.builtin.wait_for:
+    port: 22
+    host: "{{ ansible_host }}"
+    timeout: 10
+
+# ============================================
+# VERIFICATION
+# ============================================
+
+- name: Verify HAProxy configuration
+  ansible.builtin.command:
+    cmd: haproxy -c -f /etc/haproxy/haproxy.cfg
+  register: config_check
+  changed_when: false
+
+- name: Display HAProxy status
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "✅ HAProxy Deployment Complete"
+      - "============================================================"
+      - "Stats URL: http://127.0.0.1:{{ haproxy_stats_port }}/stats (localhost
+        only)"
+      - "Stats Login: {{ haproxy_stats_user }} / {{ haproxy_stats_password }}"
+      - "============================================================"
+      - "External Ports (Internet-facing):"
+      - "  SMTP: 25, 465, 587"
+      - "  IMAP: 143, 993"
+      - "  ManageSieve: 4190"
+      - "  Webmail: 80, 443"
+      - "============================================================"
+      - "Internal Ports (Internal network only):"
+      - "  LMTP: 24"
+      - "  SASL: 12345"
+      - "  Rspamd: 11334"
+      - "  Valkey: 6379"
+      - "  ClamAV: 3310"
+      - "  Stats: 8404 (localhost only)"
+      - "============================================================"
+      - "Per-IP Connection Limit: {{ haproxy_maxconn_per_ip }}"
+      - "============================================================"

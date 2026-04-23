@@ -1,0 +1,25 @@
+---
+# Unbound default configuration
+unbound_install: true
+
+# Port to listen on (5354 to avoid conflicts with systemd-resolved)
+unbound_port: 5354
+
+# Forward upstream DNS servers (respect corporate DNS)
+unbound_forward_servers:
+  - "8.8.8.8"
+  - "8.8.4.4"
+
+# IPv6 support (disable if not needed)
+unbound_ipv6_enabled: false
+
+# Cache settings
+unbound_cache_size: "256m"
+unbound_cache_min_ttl: 300
+unbound_cache_max_ttl: 86400
+
+# Performance
+unbound_num_threads: 2
+
+# Logging
+unbound_verbosity: 1

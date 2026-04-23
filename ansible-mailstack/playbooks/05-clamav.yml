@@ -1,0 +1,28 @@
+---
+- name: Deploy ClamAV antivirus
+  hosts: clamav_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+  roles:
+    - clamav
+
+  post_tasks:
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Test ClamAV with EICAR test virus
+      ansible.builtin.command:
+        cmd: echo 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | clamdscan -
+      register: eicar_test
+      ignore_errors: true
+
+    - name: Display EICAR test result
+      ansible.builtin.debug:
+        msg: "EICAR test virus detected: {{ 'YES' if 'FOUND' in eicar_test.stdout else 'NO' }}"

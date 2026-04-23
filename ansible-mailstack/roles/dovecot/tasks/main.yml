@@ -1,0 +1,243 @@
+---
+# 1. Repository and Package Setup
+- name: Install Dovecot 2.4 prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - python3-pymysql
+    state: present
+    update_cache: true
+
+- name: Remove any existing Dovecot repository files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/dovecot.list
+    - /etc/apt/sources.list.d/dovecot.sources
+  ignore_errors: true
+
+- name: Add Dovecot CE GPG key
+  ansible.builtin.shell:
+    cmd: curl -s https://repo.dovecot.org/DOVECOT-REPO-GPG-2.4 | gpg --dearmor -o
+      /usr/share/keyrings/dovecot.gpg
+    creates: /usr/share/keyrings/dovecot.gpg
+
+- name: Set permissions on Dovecot GPG key
+  ansible.builtin.file:
+    path: /usr/share/keyrings/dovecot.gpg
+    mode: "0644"
+
+# Ubuntu Noble (24.04) and Debian Trixie (13) use DEB822 format (.sources)
+- name: Add Dovecot CE repository for Ubuntu Noble
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/dovecot.sources
+    content: |
+      Types: deb
+      URIs: https://repo.dovecot.org/ce-2.4-latest/ubuntu/noble
+      Suites: noble
+      Components: main
+      Signed-By: /usr/share/keyrings/dovecot.gpg
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_release == "noble"
+
+# Ubuntu Jammy (22.04) uses legacy .list format
+- name: Add Dovecot CE repository for Ubuntu Jammy
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/dovecot.gpg]
+      https://repo.dovecot.org/ce-2.4-latest/ubuntu/jammy jammy main"
+    state: present
+    filename: dovecot
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_release == "jammy"
+
+# Debian Bookworm (12) uses legacy .list format
+- name: Add Dovecot CE repository for Debian Bookworm
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/dovecot.gpg]
+      https://repo.dovecot.org/ce-2.4-latest/debian/bookworm bookworm main"
+    state: present
+    filename: dovecot
+  when: ansible_distribution == "Debian" and ansible_distribution_release ==
+    "bookworm"
+
+# Debian Trixie (13) uses DEB822 format (.sources)
+- name: Add Dovecot CE repository for Debian Trixie
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/dovecot.sources
+    content: |
+      Types: deb
+      URIs: https://repo.dovecot.org/ce-2.4-latest/debian/trixie
+      Suites: trixie
+      Components: main
+      Signed-By: /usr/share/keyrings/dovecot.gpg
+  when: ansible_distribution == "Debian" and ansible_distribution_release == "trixie"
+
+- name: Update apt cache after adding Dovecot repo
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install Dovecot 2.4 and SQL modules
+  ansible.builtin.apt:
+    name:
+      - dovecot-core
+      - dovecot-imapd
+      - dovecot-lmtpd
+      - dovecot-sieve
+      - dovecot-mysql
+      - dovecot-managesieved
+      - dovecot-flatcurve
+    state: present
+
+# 2. System User Management
+- name: Ensure vmail group exists
+  ansible.builtin.group:
+    name: vmail
+    gid: "{{ vmail_gid | default(5100) }}"
+    state: present
+
+- name: Ensure vmail user exists
+  ansible.builtin.user:
+    name: vmail
+    uid: "{{ vmail_uid | default(5100) }}"
+    group: vmail
+    home: "{{ vmail_home | default('/var/vmail') }}"
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create mail directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ vmail_uid | default(5100) }}"
+    group: "{{ vmail_gid | default(5100) }}"
+    mode: "0755"
+  loop:
+    - "{{ vmail_home | default('/var/vmail') }}"
+    - "{{ vmail_index_path | default('/var/indexes') }}"
+    - "{{ vmail_volatile_path | default('/dev/shm/dovecot') }}"
+
+# 3. Clean environment
+- name: Remove stock configuration files
+  ansible.builtin.file:
+    path: "/etc/dovecot/conf.d/{{ item }}"
+    state: absent
+  loop:
+    - 10-auth.conf
+    - 10-logging.conf
+    - 10-mail.conf
+    - 10-master.conf
+    - 10-ssl.conf
+    - 20-lmtp.conf
+    - 90-quota.conf
+    - auth-sql.conf.ext
+
+# 4. Deploy Native 2.4.3 Templates
+- name: Deploy main dovecot.conf
+  ansible.builtin.template:
+    src: dovecot.conf.j2
+    dest: /etc/dovecot/dovecot.conf
+    owner: root
+    group: root
+    mode: "0640"
+  notify: restart dovecot
+
+- name: Deploy Dovecot conf.d stack
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/dovecot/conf.d/{{ item.dest }}"
+    owner: root
+    group: dovecot
+    mode: "0640"
+  loop:
+    - { src: "10-auth.conf.j2", dest: "10-auth.conf" }
+    - { src: "10-logging.conf.j2", dest: "10-logging.conf" }
+    - { src: "10-mail.conf.j2", dest: "10-mail.conf" }
+    - { src: "10-master.conf.j2", dest: "10-master.conf" }
+    - { src: "10-ssl.conf.j2", dest: "10-ssl.conf" }
+    - { src: "20-lmtp.conf.j2", dest: "20-lmtp.conf" }
+    - { src: "90-quota.conf.j2", dest: "90-quota.conf" }
+    - { src: "90-sieve.conf.j2", dest: "90-sieve.conf" }
+    - { src: "auth-sql.conf.ext.j2", dest: "auth-sql.conf.ext" }
+    - { src: "90-sieve-plugin.conf.j2", dest: "90-sieve-plugin.conf" }
+    - { src: "10-metrics.conf.j2", dest: "10-metrics.conf" }
+  notify: restart dovecot
+
+# 5. Security - DH Parameters
+- name: Ensure DH parameters exist for SSL
+  ansible.builtin.command:
+    cmd: openssl dhparam -out /etc/dovecot/dh.pem 2048
+    creates: /etc/dovecot/dh.pem
+
+# 6. Deploy and Compile Default Sieve Script
+- name: Ensure sieve directory exists with proper permissions for LMTP
+  ansible.builtin.file:
+    path: /etc/dovecot/sieve
+    state: directory
+    owner: root
+    group: vmail
+    mode: "0775"
+
+- name: Deploy default Sieve script
+  ansible.builtin.copy:
+    src: default.sieve
+    dest: /etc/dovecot/sieve/default.sieve
+    owner: root
+    group: vmail
+    mode: "0664"
+  register: sieve_script_deployed
+  notify: restart dovecot
+
+- name: Compile default Sieve script to binary
+  ansible.builtin.command:
+    cmd: sievec /etc/dovecot/sieve/default.sieve
+  register: sieve_compile
+  changed_when: sieve_compile.rc == 0
+  failed_when: sieve_compile.rc != 0
+  when: sieve_script_deployed.changed or not sieve_compile.stat.exists |
+    default(false)
+
+- name: Fix compiled sieve binary permissions
+  ansible.builtin.file:
+    path: /etc/dovecot/sieve/default.svbin
+    state: file
+    owner: root
+    group: vmail
+    mode: "0664"
+  when: sieve_compile.changed
+
+- name: Display Sieve compile status
+  ansible.builtin.debug:
+    msg: "Sieve script compiled successfully"
+  when: sieve_compile.changed
+
+# 7. Pre-flight Validation
+- name: Validate Dovecot configuration syntax
+  ansible.builtin.command:
+    cmd: doveconf -n
+  register: doveconf_check
+  changed_when: false
+  failed_when: false
+
+- name: Debug Dovecot configuration errors
+  ansible.builtin.debug:
+    msg: "Configuration Error: {{ doveconf_check.stderr }}"
+  when: doveconf_check.rc != 0
+
+- name: Hard fail if doveconf is invalid
+  ansible.builtin.fail:
+    msg: "Dovecot 2.4 configuration is invalid. Check debug output."
+  when: doveconf_check.rc != 0
+
+# 8. Service Control
+- name: Enable and Start Dovecot
+  ansible.builtin.systemd:
+    name: dovecot
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Configure firewall
+  import_tasks: firewall.yml
+  when: configure_firewall | default(false)

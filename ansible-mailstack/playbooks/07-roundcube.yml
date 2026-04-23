@@ -1,0 +1,60 @@
+---
+- name: Deploy Roundcube Webmail
+  hosts: roundcube_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - curl
+          - gnupg
+          - ca-certificates
+        state: present
+
+  roles:
+    - roundcube
+
+  post_tasks:
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for Roundcube to be fully ready (10 sec)
+      ansible.builtin.wait_for:
+        port: "{{ roundcube_expose_port }}"
+        host: "{{ ansible_host }}"
+        timeout: 120
+        delay: 10
+
+    - name: Verify Roundcube is responding
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ roundcube_expose_port }}"
+        status_code: 200
+      register: roundcube_health
+      ignore_errors: true
+
+    - name: Display Roundcube deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ Roundcube Deployment Complete"
+          - "============================================================"
+          - "Webmail URL: http://{{ ansible_host }}:{{ roundcube_expose_port }}"
+          - "IMAP Server: {{ dovecot_host }}:{{ dovecot_imaps_port }} (SSL)"
+          - "SMTP Server: {{ postfix_primary_host }}:{{ postfix_primary_smtps }} (SSL)"
+          - "Database: {{ mysql_host }}:{{ mysql_port }}/{{ roundcube_db_name }}"
+          - "============================================================"
+          - "Multi-domain support: Users can login with any email address"
+          - "Plugins enabled: {{ roundcube_plugins | length if roundcube_plugins is defined else 0 }}"
+          - "============================================================"
+          - "Status: {{ '✅ Running' if roundcube_health.status is defined and roundcube_health.status == 200 else '❌ Not Responding' }}"
+          - "============================================================"
+          - "For HAProxy configuration, add backend:"
+          - "  server mailweb01 {{ ansible_host }}:{{ roundcube_expose_port }} check"
+          - "============================================================"

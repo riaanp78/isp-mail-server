@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# Rspamd Rate Limit Whitelist - IPs/networks that bypass rate limiting
+# Generated from inventory - DO NOT EDIT MANUALLY
+
+# ============================================
+# INTERNAL NETWORKS
+# ============================================
+{% for network in rspamd_ratelimit_internal_networks | default([
+    '192.168.0.0/16',
+    '10.0.0.0/8', 
+    '172.16.0.0/12'
+  ]) %}
+{{ network }}
+{% endfor %}
+
+# ============================================
+# ALL SERVERS FROM INVENTORY
+# ============================================
+{# Get all hosts from all groups except special ones #}
+{% set all_hosts = [] %}
+{% for group_name in groups.keys() %}
+  {% if group_name not in ['all', 'ungrouped'] %}
+    {% for host in groups[group_name] %}
+      {% set _ = all_hosts.append(host) %}
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+{% set all_hosts = all_hosts | unique | sort %}
+
+{% for host in all_hosts %}
+{%   if hostvars[host].ansible_host is defined %}
+{{ hostvars[host].ansible_host }}
+{%   endif %}
+{% endfor %}
+
+# ============================================
+# ADDITIONAL TRUSTED HOSTS
+# ============================================
+{% for ip in rspamd_ratelimit_additional_whitelist | default([]) %}
+{{ ip }}
+{% endfor %}
