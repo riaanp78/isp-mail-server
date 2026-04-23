@@ -1,0 +1,26 @@
+<svg width="900" height="600" xmlns="http://www.w3.org/2000/svg">
+    <style> .box { fill:#1f2937; stroke:#9ca3af; stroke-width:1; rx:10; } .text { fill:#e5e7eb; font-family:monospace; font-size:12px; } .arrow { stroke:#9ca3af; stroke-width:1.5; marker-end:url(#arrowhead); } </style>
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af" />
+        </marker>
+    </defs> <!--
+    Boxes -->
+    <rect x="350" y="20" width="250" height="50" class="box" />
+    <text x="360" y="50" class="text">MySQL/MariaDB (Auth + Domains)</text>
+    <rect x="350" y="100" width="250" height="50" class="box" />
+    <text x="360" y="130" class="text">Dovecot (IMAP/LMTP)</text>
+    <rect x="350" y="180" width="250" height="50" class="box" />
+    <text x="360" y="210" class="text">Postfix (SMTP)</text>
+    <rect x="350" y="260" width="250" height="50" class="box" />
+    <text x="360" y="290" class="text">Rspamd (Filtering)</text>
+    <rect x="350" y="340" width="250" height="50" class="box" />
+    <text x="360" y="370" class="text">Valkey (Cache/Bayes)</text>
+    <rect x="350" y="420" width="250" height="50" class="box" />
+    <text x="360" y="450" class="text">NFS (/var/vmail)</text> <!-- Arrows -->
+    <line x1="450" y1="70" x2="450" y2="100" class="arrow" />
+    <line x1="450" y1="150" x2="450" y2="180" class="arrow" />
+    <line x1="450" y1="230" x2="450" y2="260" class="arrow" />
+    <line x1="450" y1="310" x2="450" y2="340" class="arrow" />
+    <line x1="450" y1="390" x2="450" y2="420" class="arrow" />
+</svg>
