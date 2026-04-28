@@ -169,8 +169,8 @@ ansible-playbook playbooks/site.yml
 
 ## Create Domains & Users
 
-* Use PostfixAdmin or SQL directly
-* Stored in MariaDB
+* Instructions to create domains and users further down in in document
+* Stored in SQL
 
 ## Test Authentication
 
@@ -183,11 +183,7 @@ doveadm auth test user@domain
 ```bash
 doveadm lmtp -d user@domain
 ```
-
-## Send Mail
-
-* SMTP ports: 25 / 465 / 587
-
+ 
 ---
 
 # 📈 Scaling
@@ -371,9 +367,9 @@ mail_domain: example.com
 mail_hostname: mail.example.com
 
 vmail_user: vmail
-vmail_uid: 5000
-vmail_gid: 5000
-mail_root: /var/vmail
+vmail_uid: 5100          # Matches your actual config
+vmail_gid: 5100
+mail_root: /var/vmail    # NFS mount point
 ```
 
 ---
@@ -383,10 +379,11 @@ mail_root: /var/vmail
 ```yaml
 mysql_host: 192.168.1.230
 mysql_port: 3306
+db_name: mailserver
+db_user: mailuser
+db_password: secure_password
+db_root_password: root_password
 
-mail_db_name: mailserver
-mail_db_user: mailuser
-mail_db_password: secure_password
 ```
 
 ---
@@ -394,15 +391,12 @@ mail_db_password: secure_password
 ## Dovecot
 
 ```yaml
-dovecot_protocols: "imap lmtp"
-dovecot_mail_location: "maildir:/var/vmail/%d/%n"
-
+dovecot_protocols: "imap pop3 lmtp sieve"
+dovecot_mail_location: "maildir:/var/vmail/%{user | domain}/%{user | username}/Maildir"
 dovecot_auth_mechanisms: "plain login"
-
-dovecot_sql_driver: mysql
-dovecot_sql_connect: "host={{ mysql_host }} dbname={{ mail_db_name }} user={{ mail_db_user }} password={{ mail_db_password }}"
-
-dovecot_lmtp_socket: "inet:24"
+dovecot_lmtp_port: 24
+dovecot_sasl_port: 12345    # TCP socket for Postfix
+dovecot_managesieve_port: 4190
 ```
 
 ---
@@ -412,23 +406,15 @@ dovecot_lmtp_socket: "inet:24"
 ```yaml
 postfix_myhostname: "{{ mail_hostname }}"
 postfix_mydomain: "{{ mail_domain }}"
-
 postfix_inet_interfaces: all
 postfix_inet_protocols: ipv4
 
-postfix_smtpd_tls_cert_file: /etc/ssl/certs/mail.pem
-postfix_smtpd_tls_key_file: /etc/ssl/private/mail.key
-
-postfix_virtual_mailbox_domains: "mysql:/etc/postfix/mysql-virtual-domains.cf"
-postfix_virtual_mailbox_maps: "mysql:/etc/postfix/mysql-virtual-mailboxes.cf"
-postfix_virtual_alias_maps: "mysql:/etc/postfix/mysql-virtual-aliases.cf"
-
+# SASL over TCP (not Unix socket)
 postfix_sasl_type: dovecot
-postfix_sasl_path: private/auth
+postfix_sasl_path: inet:{{ dovecot_host }}:12345
 
-postfix_milter_default_action: accept
-postfix_milter_protocol: 6
-postfix_smtpd_milters: inet:rspamd:11332
+# Rspamd milter
+postfix_smtpd_milters: inet:{{ rspamd_host }}:11332
 ```
 
 ---
@@ -436,13 +422,18 @@ postfix_smtpd_milters: inet:rspamd:11332
 ## Rspamd
 
 ```yaml
-rspamd_bind: 0.0.0.0
-rspamd_port: 11332
+# Note: Uses Valkey, not Redis
+rspamd_controller_port: 11334
+rspamd_milter_port: 11332
+rspamd_proxy_port: 11333
 
-rspamd_redis_servers: "192.168.1.233:6379"
+# Valkey connection (note variable name)
+valkey_host: 192.168.1.233
+valkey_port: 6379
+valkey_password: "Valkey8k7fG9xP2mQ4wR6tY3uV1nB5cX9zL0aM"
 
+# DKIM settings
 rspamd_dkim_signing: true
-rspamd_dkim_domain: example.com
 rspamd_dkim_selector: mail
 ```
 
@@ -455,6 +446,45 @@ valkey_bind: 0.0.0.0
 valkey_port: 6379
 valkey_maxmemory: 512mb
 valkey_maxmemory_policy: allkeys-lru
+valkey_password: "secure_password"  # Required if set
+```
+
+
+## HAProxy
+
+```yml
+haproxy_stats_port: 8404
+haproxy_stats_user: admin
+haproxy_stats_password: "CHANGE_ME_HAPROXY_PASSWORD"
+
+# External ports exposed
+haproxy_external_ports:
+  - 25   # SMTP
+  - 465  # SMTPS
+  - 587  # Submission
+  - 143  # IMAP
+  - 993  # IMAPS
+  - 4190 # ManageSieve
+  - 80   # HTTP (Roundcube)
+  - 443  # HTTPS (Roundcube)
+```
+
+## Unbound DNS
+```yml
+unbound_port: 5354
+unbound_cache_size: 512m
+unbound_num_threads: 4
+unbound_forward_servers:
+  - "8.8.8.8"
+  - "8.8.4.4"
+```
+
+## NFS
+```yml
+nfs_host: 192.168.1.229
+nfs_export: "/srv/vmail"           # Actual export
+nfs_mount_point: "/var/vmail"      # Client mount point
+nfs_mount_options: "hard,intr,noatime,nordirplus,actimeo=60"
 ```
 
 ---
@@ -466,6 +496,20 @@ nfs_export_path: /var/vmail
 nfs_allowed_hosts:
   - 192.168.1.0/24
 ```
+
+## Unbound DNS
+
+* Local recursive DNS resolver for Rspamd
+* Runs on port 5354 (avoids conflict with systemd-resolved)
+* Provides DNS resolution for spam filtering
+* Configured with DNSSEC validation
+
+## HAProxy
+
+* Load balancer for all mail services
+* Terminates TLS for SMTP, IMAP, and webmail
+* Provides statistics page (localhost:8404)
+* Supports sticky sessions for IMAP
 
 ---
 
@@ -849,3 +893,31 @@ rspamadm stat -b
 
 ---
 
+
+
+## 📊 Quick Reference Card to Add
+
+At the end of your README, add:
+
+```markdown
+## 📋 Quick Reference
+
+| Service | Ports | Config Location |
+|---------|-------|-----------------|
+| Postfix | 25, 465, 587 | `/etc/postfix/` |
+| Dovecot | 143, 993, 24, 12345, 4190 | `/etc/dovecot/` |
+| Rspamd | 11332, 11334 | `/etc/rspamd/` |
+| Valkey | 6379 | `/etc/valkey/` |
+| Unbound | 5354 | `/etc/unbound/` |
+| HAProxy | 80, 443, 8404 | `/etc/haproxy/` |
+| MySQL | 3306 | `/etc/mysql/` |
+| NFS | 2049 | `/etc/exports` |
+| Roundcube | 80 (container) | `/opt/roundcube/` |
+| Grafana | 3000 | Docker container |
+| Prometheus | 9090 | Docker container |
+
+**Log Locations:**
+- Mail: `/var/log/mail.log`
+- Dovecot: `/var/log/dovecot*.log`
+- Rspamd: `/var/log/rspamd/rspamd.log`
+- HAProxy: `/var/log/haproxy.log`
