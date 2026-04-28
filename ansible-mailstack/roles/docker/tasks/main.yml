@@ -1,0 +1,77 @@
+---
+# Check if Docker is already installed
+- name: Check if Docker is installed
+  ansible.builtin.command:
+    cmd: docker --version
+  register: docker_check
+  failed_when: false
+  changed_when: false
+
+- name: Set Docker installed fact
+  ansible.builtin.set_fact:
+    docker_installed: "{{ docker_check.rc == 0 }}"
+
+- name: Include installation tasks
+  ansible.builtin.include_tasks: install.yml
+  when: not docker_installed or docker_version != 'latest'
+
+- name: Include cleanup tasks (remove old conflicting packages)
+  ansible.builtin.include_tasks: cleanup.yml
+  when: docker_cleanup_old | default(false)
+
+# ============================================
+# ALWAYS ENSURE DOCKER CONFIGURATION IS CORRECT
+# ============================================
+
+- name: Ensure Docker configuration directory exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Docker daemon configuration
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart docker
+
+- name: Ensure docker group exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+    system: true
+
+- name: Add users to docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: yes
+  loop: "{{ docker_users }}"
+
+# Flush handlers to ensure Docker restarts if config changed
+- name: Flush handlers to apply Docker configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Docker is started and enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: "{{ docker_service_state }}"
+    enabled: "{{ docker_service_enabled }}"
+    daemon_reload: yes
+
+- name: Display Docker version
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "✅ Docker Configuration Complete"
+      - "============================================================"
+      - "Docker Version: {{ docker_check.stdout if docker_check.rc == 0 else 'installed' }}"
+      - "Docker Compose: Built-in (docker compose)"
+      - "Config file: /etc/docker/daemon.json"
+      - "============================================================"
+      

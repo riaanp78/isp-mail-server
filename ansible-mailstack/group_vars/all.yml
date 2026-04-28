@@ -1,6 +1,7 @@
 ---
-# Keep only what you actually use:
-# Mail storage paths
+# ============================================
+# MAIL STORAGE PATHS
+# ============================================
 vmail_home: "/var/vmail"
 vmail_uid: 5100
 vmail_gid: 5100
@@ -9,19 +10,99 @@ vmail_gid: 5100
 vmail_index_path: "/var/indexes"
 vmail_volatile_path: "/dev/shm/dovecot"
 
-# Service accounts (keep if used)
+# Mail admin user configuration
+mail_admin_password: "ChangeMe123!"  # Change this to a secure password
+mail_domain: "example.com"
+
+# ============================================
+# MAIL DOMAIN
+# ============================================
+mail_hostname: "mail.{{ mail_domain }}"
+
+# ============================================
+# SERVICE ACCOUNTS
+# ============================================
 service_accounts:
   dovecot: { uid: 5000, gid: 5000, user: dovecot, group: dovecot }
   postfix: { uid: 5001, gid: 5001, user: postfix, group: postfix }
-  # ... only if you actually reference these in templates
 
-# Database connection
+# ============================================
+# DATABASE CONNECTION (Mailserver DB)
+# ============================================
 db_host: "{{ endpoints.mysql.host }}"
 db_port: "{{ endpoints.mysql.port }}"
 db_name: "mailserver"
 db_user: "mailuser"
 db_password: "CHANGE_ME_STRONG_PASSWORD"
 
-# Mail domain
-mail_domain: "example.com"
-mail_hostname: "mail.{{ mail_domain }}"
+# ============================================
+# ROUNDCUBE DATABASE
+# ============================================
+roundcube_db_name: "roundcubemail"
+roundcube_db_user: "roundcube"
+roundcube_db_password: "CHANGE_ME_ROUNDCUBE_PASSWORD"
+
+# ============================================
+# POSTFIXADMIN DATABASE
+# ============================================
+postfixadmin_db_name: "postfixadmin"
+postfixadmin_db_user: "postfixadmin"
+postfixadmin_db_password: "CHANGE_ME_POSTFIXADMIN_PASSWORD"
+
+# ============================================
+# POSTFIXADMIN WEB INTERFACE
+# ============================================
+postfixadmin_expose_port: 8080
+postfixadmin_admin_email: "admin@{{ mail_domain }}"
+postfixadmin_admin_password: "CHANGE_ME_ADMIN_PASSWORD"
+postfixadmin_setup_password: "CHANGE_ME_SETUP_PASSWORD"
+postfixadmin_password_hash: "php_crypt:BLF-CRYPT"
+
+# Dynamic SMTP host - handles empty groups gracefully
+postfixadmin_smtp_host: "{{ (groups['postfix_servers'] | length > 0) |
+  ternary(hostvars[groups['postfix_servers'][0]]['ansible_host'], 'localhost')
+  }}"
+postfixadmin_smtp_port: 25
+
+postfixadmin_docker_purge_all: false
+postfixadmin_backup_enabled: true
+postfixadmin_backup_time: "03:00"
+postfixadmin_backup_retention_days: 30
+
+
+
+# ============================================
+# DOCKER CONFIGURATION
+# ============================================
+docker_version: "latest"
+
+docker_daemon_config:
+  log-driver: "json-file"
+  log-opts:
+    max-size: "10m"
+    max-file: "3"
+  storage-driver: "overlay2"
+  ip-forward: true
+  iptables: true
+  ip-masq: true
+  userland-proxy: false
+
+docker_network_name: "mailstack_net"
+docker_network_subnet: "172.20.0.0/16"
+
+docker_users:
+  - "root"
+
+docker_experimental: false
+docker_service_state: started
+docker_service_enabled: true
+docker_cleanup_old: true
+
+# Registry mirrors (optional)
+docker_registry_mirrors: []
+
+# ============================================
+# MYSQL EXPORTER FOR MONITORING
+# ============================================
+mysql_exporter_enabled: true
+mysql_exporter_password: "CHANGE_ME_EXPORTER_PASSWORD"

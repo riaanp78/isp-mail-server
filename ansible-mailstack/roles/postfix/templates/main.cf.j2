@@ -1,95 +1,154 @@
-# Postfix main.cf for distributed mail stack
-# Dovecot backend: {{ endpoints.dovecot.lmtp }}
+# ============================================================
+# Postfix main.cf
+# Dovecot LMTP backend: {{ endpoints.dovecot.lmtp }}
+# Managed by Ansible
+# ============================================================
 
-# Basic configuration
+# ------------------------------------------------------------
+# Basic identity
+# ------------------------------------------------------------
 myhostname = {{ mail_hostname }}
-mydomain = {{ mail_domain }}
-myorigin = {{ mail_domain }}
+mydomain   = {{ mail_domain }}
+myorigin   = {{ mail_domain }}
 
-# Networks
-mynetworks = {% for net in internal_networks %}{{ net }}{% if not loop.last %}, {% endif %}{% endfor %}
+# ------------------------------------------------------------
+# Network
+# ------------------------------------------------------------
+mynetworks    = {% for net in internal_networks %}{{ net }}{% if not loop.last %}, {% endif %}{% endfor %}
+
 inet_interfaces = all
-inet_protocols = ipv4
+inet_protocols  = ipv4
 
-# Virtual mailbox configuration (Dovecot backend over TCP)
+# ------------------------------------------------------------
+# Virtual mailbox — Dovecot LMTP delivery over TCP
+# ------------------------------------------------------------
 virtual_transport = lmtp:inet:{{ endpoints.dovecot.lmtp }}
 
-# LMTP specific settings
-lmtp_host_lookup = dns
-lmtp_tcp_port = {{ dovecot_lmtp_port | default(24) }}
+# LMTP settings
+lmtp_host_lookup = native
+lmtp_tcp_port    = {{ dovecot_lmtp_port | default(24) }}
 
-# Virtual domain and mailbox maps (MySQL)
+# ------------------------------------------------------------
+# MySQL lookup maps — all queries hit views in the mailserver DB
+# ------------------------------------------------------------
 virtual_mailbox_domains = mysql:/etc/postfix/mysql_virtual_domains_maps.cf
-virtual_alias_maps = mysql:/etc/postfix/mysql_virtual_alias_maps.cf
-virtual_mailbox_maps = mysql:/etc/postfix/mysql_virtual_mailbox_maps.cf
+virtual_alias_maps      = mysql:/etc/postfix/mysql_virtual_alias_maps.cf
+virtual_mailbox_maps    = mysql:/etc/postfix/mysql_virtual_mailbox_maps.cf
 
-# SASL authentication (Dovecot backend)
-smtpd_sasl_type = dovecot
-smtpd_sasl_path = inet:{{ endpoints.dovecot.sasl_auth }}
-smtpd_sasl_auth_enable = yes
+# Prevent authenticated users from spoofing sender addresses
+smtpd_sender_login_maps    = mysql:/etc/postfix/mysql_sender_login_maps.cf
+
+# ------------------------------------------------------------
+# SASL authentication — Dovecot inet backend
+# smtpd_sasl_path for inet: must be host:port only (no inet: prefix)
+# ------------------------------------------------------------
+smtpd_sasl_type            = dovecot
+smtpd_sasl_path            = inet:{{ endpoints.dovecot.sasl_auth }}
+smtpd_sasl_auth_enable     = yes
 smtpd_sasl_security_options = noanonymous
-smtpd_sasl_local_domain = $myhostname
-broken_sasl_auth_clients = yes
+smtpd_sasl_local_domain    = $myhostname
+broken_sasl_auth_clients   = yes
 
-# TLS/SSL configuration
-smtpd_tls_cert_file = {{ ssl_cert_path }}
-smtpd_tls_key_file = {{ ssl_key_path }}
-smtpd_tls_security_level = may
-smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+# ------------------------------------------------------------
+# TLS
+# ------------------------------------------------------------
+smtpd_tls_cert_file           = {{ ssl_cert_path }}
+smtpd_tls_key_file            = {{ ssl_key_path }}
+smtpd_tls_security_level      = may
+smtpd_tls_protocols           = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
 smtpd_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
-smtpd_tls_loglevel = 1
+smtpd_tls_loglevel            = 1
+smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
 
+smtp_tls_security_level       = may
+smtp_tls_loglevel             = 1
+smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
+
+# ------------------------------------------------------------
 # SMTP restrictions
-smtpd_recipient_restrictions = 
+# ------------------------------------------------------------
+smtpd_relay_restrictions =
+    permit_mynetworks
+    permit_sasl_authenticated
+    reject_unauth_destination
+
+smtpd_recipient_restrictions =
     permit_mynetworks
     permit_sasl_authenticated
     reject_unauth_destination
     reject_unknown_recipient_domain
 
+smtpd_sender_restrictions =
+    permit_mynetworks
+    permit_sasl_authenticated
+    reject_sender_login_mismatch
+    reject_unknown_sender_domain
+
 smtpd_helo_required = yes
-smtpd_helo_restrictions = 
+smtpd_helo_restrictions =
     permit_mynetworks
     permit_sasl_authenticated
     reject_invalid_helo_hostname
     reject_non_fqdn_helo_hostname
 
+smtpd_client_restrictions =
+    permit_mynetworks
+    permit_sasl_authenticated
+
 compatibility_level = 3.6
 
-# Message size limits
-message_size_limit = {{ postfix_message_size_limit | default(26214400) }}
-mailbox_size_limit = 0
+# ------------------------------------------------------------
+# Message and mailbox limits
+# virtual_mailbox_limit = 0: Postfix imposes no limit;
+# quota is enforced by Dovecot count driver via userdb
+# ------------------------------------------------------------
+message_size_limit    = {{ postfix_message_size_limit | default(26214400) }}
+mailbox_size_limit    = 0
 virtual_mailbox_limit = 0
 
+# ------------------------------------------------------------
 # Rate limiting
+# ------------------------------------------------------------
 smtpd_client_connection_rate_limit = {{ postfix_smtpd_client_connection_rate_limit | default(100) }}
-smtpd_client_message_rate_limit = {{ postfix_smtpd_client_message_rate_limit | default(30) }}
-
-# Logging
-debug_peer_level = 2
-debug_peer_list = {{ mail_domain }}
-
-# Performance
-default_process_limit = 100
+smtpd_client_message_rate_limit    = {{ postfix_smtpd_client_message_rate_limit | default(30) }}
 smtpd_client_connection_count_limit = 10
 
-# Local delivery (disabled - using Dovecot LMTP)
+# ------------------------------------------------------------
+# Local delivery disabled — all mail goes via Dovecot LMTP
+# ------------------------------------------------------------
 local_transport = error:local delivery disabled
+mydestination   =
 
-# Postscreen configuration
-postscreen_access_list = permit_mynetworks
+# ------------------------------------------------------------
+# Performance
+# ------------------------------------------------------------
+default_process_limit = 100
+
+# ------------------------------------------------------------
+# Postscreen
+# ------------------------------------------------------------
+postscreen_access_list    = permit_mynetworks
 postscreen_blacklist_action = ignore
 
-# DNS lookups
+# ------------------------------------------------------------
+# DNS
+# ------------------------------------------------------------
 disable_dns_lookups = no
 
-# ============================================
-# Rspamd Milter Configuration (Spam Filtering)
-# ============================================
-# Enable/disable via rspamd_enabled variable in hosts.yml
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
+debug_peer_level = 2
+debug_peer_list  = {{ mail_domain }}
+
+# ------------------------------------------------------------
+# Rspamd milter (optional)
+# ------------------------------------------------------------
 {% if rspamd_enabled | default(false) %}
-smtpd_milters = inet:{{ rspamd_host }}:{{ rspamd_milter_port }}
-non_smtpd_milters = $smtpd_milters
-milter_protocol = 6
+smtpd_milters        = inet:{{ rspamd_host }}:{{ rspamd_milter_port }}
+non_smtpd_milters    = $smtpd_milters
+milter_protocol      = 6
 milter_default_action = accept
-milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}
+milter_mail_macros   = i {mail_addr} {client_addr} {client_name} {auth_authen}
 {% endif %}
+

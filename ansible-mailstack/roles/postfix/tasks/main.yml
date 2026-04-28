@@ -101,17 +101,20 @@
     - /var/log/postfix
 
 # 4. Configure MySQL lookup files
+# All maps query views defined in the mailserver DB schema.
+# Adding mysql_sender_login_maps.cf to prevent sender spoofing.
 - name: Deploy MySQL virtual maps
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: "/etc/postfix/{{ item }}"
     owner: root
-    group: root
+    group: postfix
     mode: "0640"
   loop:
     - mysql_virtual_domains_maps.cf
     - mysql_virtual_alias_maps.cf
     - mysql_virtual_mailbox_maps.cf
+    - mysql_sender_login_maps.cf
   notify: restart postfix
 
 # 5. Remove any transport maps that might override LMTP
@@ -180,15 +183,13 @@
 
 - name: Generate certificate signing request
   ansible.builtin.command:
-    cmd: "openssl req -new -key {{ ssl_key_path }} -out /tmp/mail.csr -subj '/CN={{
-      mail_hostname }}'"
+    cmd: "openssl req -new -key {{ ssl_key_path }} -out /tmp/mail.csr -subj '/CN={{ mail_hostname }}'"
     creates: /tmp/mail.csr
   when: ssl_self_signed | default(true)
 
 - name: Generate self-signed certificate
   ansible.builtin.command:
-    cmd: "openssl x509 -req -days 365 -in /tmp/mail.csr -signkey {{ ssl_key_path }}
-      -out {{ ssl_cert_path }}"
+    cmd: "openssl x509 -req -days 365 -in /tmp/mail.csr -signkey {{ ssl_key_path }} -out {{ ssl_cert_path }}"
     creates: "{{ ssl_cert_path }}"
   when: ssl_self_signed | default(true)
 
@@ -205,9 +206,9 @@
     port: "{{ item }}"
     proto: tcp
   loop:
-    - 25 # SMTP
-    - 465 # SMTPS
-    - 587 # Submission
+    - 25   # SMTP
+    - 465  # SMTPS
+    - 587  # Submission
   when: configure_firewall | default(false)
 
 # 12. Validate configuration
@@ -236,16 +237,25 @@
     enabled: yes
     daemon_reload: yes
 
-# 14. Test database connectivity
-- name: Test MySQL connection from Postfix
+# 14. Test database connectivity via all four maps
+- name: Test domain lookup
   ansible.builtin.command:
-    cmd: "postmap -q {{ mail_domain }}
-      mysql:/etc/postfix/mysql_virtual_domains_maps.cf"
+    cmd: "postmap -q {{ mail_domain }} mysql:/etc/postfix/mysql_virtual_domains_maps.cf"
   register: domain_test
   ignore_errors: true
   changed_when: false
 
 - name: Display domain lookup result
   ansible.builtin.debug:
-    msg: "Domain lookup: {{ domain_test.stdout if domain_test.rc == 0 else 'Failed'
-      }}"
+    msg: "Domain lookup: {{ domain_test.stdout if domain_test.rc == 0 else 'FAILED - check DB connectivity and postfix_domains view' }}"
+
+- name: Test alias lookup (postmaster)
+  ansible.builtin.command:
+    cmd: "postmap -q postmaster@{{ mail_domain }} mysql:/etc/postfix/mysql_virtual_alias_maps.cf"
+  register: alias_test
+  ignore_errors: true
+  changed_when: false
+
+- name: Display alias lookup result
+  ansible.builtin.debug:
+    msg: "Alias lookup: {{ alias_test.stdout if alias_test.rc == 0 else 'FAILED - check postfix_aliases view' }}"

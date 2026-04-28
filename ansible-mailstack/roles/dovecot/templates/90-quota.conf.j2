@@ -1,43 +1,40 @@
-### Quota Configuration (Native 2.4.3)
-# Based on: https://doc.dovecot.org/2.4.3/core/plugins/quota.html
+# ============================================================
+# Dovecot 2.4 Quota Configuration
+# Managed by Ansible
+#
+# Strategy:
+#   - 'count' driver enforces limits using index metadata (no vsize scan)
+#   - Per-user limit comes from userdb quota_storage_size field
+#     (returned by the SQL userdb query from mailbox.quota column)
+#   - 90-quota.conf sets the *default* fallback limit only;
+#     per-user values from userdb override it automatically
+# ============================================================
 
-# Enable quota plugin globally
 mail_plugins {
   quota = yes
- 
 }
 
-# Enable IMAP QUOTA extension for IMAP protocol
 protocol imap {
   mail_plugins {
     imap_quota = yes
- 
   }
 }
 
-# Optional: Custom quota exceeded message (top-level setting)
+# Shown to the sending MTA when quota is exceeded
 quota_exceeded_message = User %{user} has exhausted allowed storage space.
 
-# Recommended: Use count driver with index tracking
+# Required by count driver
 mailbox_list_index = yes
 
-# Performance: Avoid vsize calculation delays during delivery
+# Avoid blocking delivery while vsize is being calculated
 protocol !indexer-worker {
   mail_vsize_bg_after_count = 100
 }
 
-# Define the quota root
+# Default quota root — applies when userdb returns no quota_storage_size
+# (i.e. quota = 0 / NULL in the DB, meaning unlimited, so this fallback
+# only fires for accounts that somehow have no quota row at all)
 quota "User quota" {
-  quota_driver = count
-  quota_storage_size = {{ dovecot_default_quota | default('1G') }}
-  
-  # Optional: Add grace to allow last message to exceed quota slightly
-  # quota_storage_grace = 10 M
-  
-  # Optional: Ignore Trash folder from quota (uncomment if desired)
-  # namespace inbox {
-  #   mailbox Trash {
-  #     quota_ignore = yes
-  #   }
-  # }
+  quota_driver          = count
+  quota_storage_size    = {{ dovecot_default_quota | default('1G') }}
 }

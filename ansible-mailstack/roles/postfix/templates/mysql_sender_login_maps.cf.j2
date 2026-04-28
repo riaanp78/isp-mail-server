@@ -1,0 +1,10 @@
+# MySQL sender login map
+# Used by smtpd_sender_login_maps to enforce that an authenticated
+# user can only send mail from their own address.
+# Queries the postfix_sender_login view (active mailboxes only).
+user     = {{ db_user }}
+password = {{ db_password }}
+hosts    = {{ db_host }}
+dbname   = {{ db_name }}
+query    = SELECT login FROM postfix_sender_login WHERE sender='%s'
+

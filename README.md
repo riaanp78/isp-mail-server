@@ -2,6 +2,8 @@
 
 A horizontally scalable, production-grade mail system built with **Postfix, Dovecot, Rspamd, Valkey, MariaDB, and NFS**, fully automated using **Ansible**.
 
+At the very least this setup will help you get going and you can customize to your hearts content
+
 ---
 
 # 🧭 Design Principles
@@ -70,14 +72,16 @@ A horizontally scalable, production-grade mail system built with **Postfix, Dove
 
 ## Software
 
+* Docker
 * Ansible 2.14+
-* Python 3.10+
 * MariaDB 10.11+
 * Postfix
 * Dovecot
 * Rspamd
 * Valkey
 * NFS server
+* Grafana
+* Prometheus
 
 ---
 
@@ -607,12 +611,70 @@ systemctl restart valkey
 
 ## Add New Domain
 
-1. Add via PostfixAdmin or DB
+1. Via SQL
+
+Example:
+```bash
+INSERT INTO domain (domain, description, max_quota, active) 
+VALUES ('newdomain.com', 'Client domain', 10737418240, 1);
+```
+
 2. Verify:
 
    * MX record exists
    * DKIM configured
 3. Test send/receive
+
+
+## Add New Email User
+1. Via SQL
+
+Example:
+```bash
+INSERT INTO mailbox (username, password, name, domain, quota, active) 
+VALUES (
+    'user@newdomain.com', 
+    '{BLF-CRYPT}$2y$10$...',  -- Use doveadm to generate
+    'First Last', 
+    'newdomain.com', 
+    1073741824, 
+    1
+);
+```
+
+2. You can Generate a password using doveadm
+```bash
+doveadm pw -s BLF-CRYPT
+# Enter password, copy the output including {BLF-CRYPT} prefix
+```
+
+## Add Email Alias
+1. Via SQL
+```bash
+INSERT INTO alias (address, goto, domain, active) 
+VALUES ('info@newdomain.com', 'user@newdomain.com', 'newdomain.com', 1);
+```
+
+## Confirmations
+
+### Domain added
+```bash
+SELECT * FROM postfix_domains;
+```
+
+### Check User Added
+```bash
+SELECT * FROM postfix_mailboxes;
+```
+
+## Test SMTP Auth
+```bash
+doveadm lmtp -d user@newdomain.com
+echo "Test email body" | mailx -s "Test" user@newdomain.com
+
+```
+
+
 
 ---
 
@@ -640,6 +702,121 @@ mysqldump mailserver > backup.sql
 
 ```bash
 rsync -av /var/vmail /backup/
+```
+
+
+
+## Rspamd Management Scripts
+
+### /usr/local/bin/generate-dkim-keys
+
+What it does:
+  * Generates DKIM keys for all domains in your database
+  * Stores keys on NFS (shared across all Rspamd nodes)
+  * Creates symlinks for Rspamd 4.x compatibility
+  * Updates Rspamd signing table automatically
+
+Usage:
+```bash
+
+# Generate DKIM for a single domain
+generate-dkim-keys -d example.com
+
+# Generate for ALL domains in database
+generate-dkim-keys -a
+
+# Force regenerate existing keys
+generate-dkim-keys -d example.com -f
+
+# List all domains with DKIM status
+generate-dkim-keys -l
+
+# Show DNS records for all domains
+generate-dkim-keys -L
+
+# Check if DKIM exists for a domain
+generate-dkim-keys -c example.com
+
+# Custom selector and key size
+generate-dkim-keys -d example.com -s mail -b 2048
+```
+
+###  DKIM Auto-Generation Service (dkim-autogen)
+
+What it does:
+  * Runs every 5 minutes via systemd timer
+  * Automatically detects new domains added to database
+  * Generates missing DKIM keys
+  * Includes jitter (random delay) to prevent thundering herd on NFS
+
+Status check:
+```bash
+
+# Check if timer is running
+systemctl status dkim-autogen.timer
+
+# View recent runs
+journalctl -u dkim-autogen.service -n 20
+
+# Manual trigger
+systemctl start dkim-autogen.service
+```
+
+### Mail Query Tool (mail-query)
+
+Location: /usr/local/bin/mail-query
+
+What it does:
+  * Quick database queries without writing SQL
+  * Reads configuration from /etc/mailstack/mailstack.conf
+
+Usage:
+```bash
+
+# List all domains
+mail-query --domains
+
+# List all users
+mail-query --users
+
+# List all aliases
+mail-query --aliases
+
+# Show database statistics
+mail-query --stats
+
+# Show specific domain details
+mail-query --domain example.com
+
+# Show specific user details
+mail-query --user admin@example.com
+```
+
+## Rate Limit Management
+
+```bash
+# Check rate limit rules
+rspamadm configdump ratelimit
+
+# Clear rate limit for specific IP
+rspamc -h localhost:11334 delkey "ratelimit:ip:192.168.1.100"
+
+# Clear rate limit for specific user
+rspamc -h localhost:11334 delkey "ratelimit:user:john@example.com"
+```
+
+
+## Bayes Learning
+```bash
+
+# Learn spam
+rspamc learn_spam /path/to/message.eml
+
+# Learn ham
+rspamc learn_ham /path/to/message.eml
+
+# Check Bayes stats
+rspamadm stat -b
 ```
 
 ---
@@ -671,3 +848,4 @@ rsync -av /var/vmail /backup/
 * Monitor queue size aggressively
 
 ---
+

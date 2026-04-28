@@ -1,0 +1,55 @@
+---
+- name: Test Docker Role Installation
+  hosts: all
+  become: true
+  gather_facts: true
+  
+  roles:
+    - docker
+
+  post_tasks:
+    - name: Verify Docker is installed
+      ansible.builtin.command:
+        cmd: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Verify Docker Compose is available (built-in)
+      ansible.builtin.command:
+        cmd: docker compose version
+      register: compose_version
+      changed_when: false
+
+    - name: Verify Docker daemon is running
+      ansible.builtin.systemd:
+        name: docker
+      register: docker_status
+
+    - name: Test Docker with hello-world container
+      ansible.builtin.command:
+        cmd: docker run --rm hello-world
+      register: hello_world
+      changed_when: false
+      failed_when: hello_world.rc != 0
+
+    - name: Display Docker test results
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "✅ Docker Test Results"
+          - "============================================================"
+          - "Docker Version: {{ docker_version.stdout }}"
+          - "Docker Compose: {{ compose_version.stdout }}"
+          - "Docker Service: {{ docker_status.status.ActiveState }}"
+          - "Hello-World Test: {{ 'PASSED' if hello_world.rc == 0 else 'FAILED' }}"
+          - "============================================================"
+          - "Docker daemon configuration:"
+          - "  Log Driver: json-file"
+          - "  Log Max Size: 10m"
+          - "  Storage Driver: overlay2"
+          - "  IP Forward: enabled"
+          - "============================================================"
+          - "Users in docker group:"
+          - "  {{ docker_users | join(', ') }}"
+          - "============================================================"
+          

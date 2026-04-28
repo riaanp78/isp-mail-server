@@ -34,6 +34,7 @@ services:
       - GF_PATHS_DATA=/var/lib/grafana
       - GF_PATHS_LOGS=/var/log/grafana
       - GF_PATHS_PLUGINS=/var/lib/grafana/plugins
+      - GF_DASHBOARDS_DELETE_FOREVER_ENABLED=true
     volumes:
       - {{ grafana_data_dir }}:/var/lib/grafana
       - {{ monitoring_base_dir }}/provisioning/datasources:/etc/grafana/provisioning/datasources:ro

@@ -1,4 +1,4 @@
-# HAProxy configuration for MailStack
+# HAProxy 2.8 configuration for MailStack
 # Managed by Ansible - DO NOT EDIT MANUALLY
 # Generated: {{ ansible_date_time.iso8601 }}
 
@@ -21,6 +21,10 @@ global
     ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384
     ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
 
+    # Disable server-side SSL verification globally for self-signed certs.
+    # Individual backends that need verification can override with 'verify required'.
+    ssl-server-verify none
+
     # Performance tuning
     nbthread {{ ansible_processor_cores | default(2) }}
     tune.ssl.default-dh-param 2048
@@ -36,14 +40,15 @@ defaults
     retries 3
     maxconn {{ haproxy_backend_maxconn | default(4096) }}
     timeout connect {{ haproxy_timeout_connect | default('10s') }}
-    timeout client {{ haproxy_timeout_client | default('30s') }}
-    timeout server {{ haproxy_timeout_server | default('30s') }}
-    timeout queue {{ haproxy_timeout_queue | default('30s') }}
-    timeout tunnel {{ haproxy_timeout_tunnel | default('1h') }}
-    timeout http-request 10s
+    timeout client  {{ haproxy_timeout_client  | default('30s') }}
+    timeout server  {{ haproxy_timeout_server  | default('30s') }}
+    timeout queue   {{ haproxy_timeout_queue   | default('30s') }}
+    timeout tunnel  {{ haproxy_timeout_tunnel  | default('1h')  }}
+    # http-request timeout only applies in http mode — set per-frontend below
+    # (putting it in tcp defaults causes a warning on HAProxy 2.8)
 
 # ============================================
-# STATISTICS PAGE (LOCALHOST ONLY - SECURE)
+# STATISTICS PAGE (LOCALHOST ONLY)
 # ============================================
 
 listen stats
@@ -59,13 +64,16 @@ listen stats
     http-request add-header Cache-Control no-cache
 
 # ============================================
-# ROUNDCUBE WEBMAIL (HTTP/HTTPS)
+# ROUNDCUBE WEBMAIL (HTTP / HTTPS)
+# HAProxy terminates SSL, forwards plain HTTP to Roundcube containers.
+# Sticky sessions via cookie so a user always hits the same Roundcube node.
 # ============================================
 
 frontend webmail_http
     bind :80
     mode http
     option httplog
+    timeout http-request 10s
     capture request header Host len 32
     capture request header X-Forwarded-For len 15
     default_backend roundcube_backend
@@ -74,6 +82,7 @@ frontend webmail_https
     bind :443 ssl crt {{ haproxy_ssl_cert_path }} alpn h2,http/1.1
     mode http
     option httplog
+    timeout http-request 10s
     http-request set-header X-Forwarded-Proto https
     capture request header Host len 32
     capture request header X-Forwarded-For len 15
@@ -83,7 +92,7 @@ backend roundcube_backend
     mode http
     balance roundrobin
     option httpchk
-    http-check send meth HEAD uri / ver HTTP/1.1 hdr Host localhost
+    http-check send meth HEAD uri /health-check ver HTTP/1.1 hdr Host localhost
     http-check expect status 200
     cookie MAILSTACK_RC insert indirect nocache
 {% for host in groups['roundcube_servers'] | default([]) %}
@@ -91,7 +100,8 @@ backend roundcube_backend
 {% endfor %}
 
 # ============================================
-# POSTFIX SMTP (PORT 25)
+# POSTFIX SMTP (PORT 25) — plain, no SSL
+# smtpchk sends EHLO and expects 250 — correct for port 25.
 # ============================================
 
 frontend smtp
@@ -109,7 +119,10 @@ backend postfix_smtp_backend
 {% endfor %}
 
 # ============================================
-# POSTFIX SMTPS (PORT 465)
+# POSTFIX SMTPS (PORT 465) — implicit SSL
+# HAProxy terminates SSL on :465, then forwards plain SMTP to backend:465.
+# Health check: open SSL connection to backend, expect SMTP 220 banner.
+# Backend speaks SSL so the check probe must also use SSL (verify none = self-signed).
 # ============================================
 
 frontend smtps
@@ -121,13 +134,17 @@ frontend smtps
 backend postfix_smtps_backend
     mode tcp
     balance roundrobin
-    option smtpchk
+    option tcp-check
+    tcp-check connect ssl
+    tcp-check expect string "220"
 {% for host in groups['postfix_servers'] | default([]) %}
-    server {{ host }} {{ hostvars[host]['ansible_host'] }}:465 check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }} maxconn {{ haproxy_maxconn_per_ip | default(200) }}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:465 ssl verify none check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }} maxconn {{ haproxy_maxconn_per_ip | default(200) }}
 {% endfor %}
 
 # ============================================
-# POSTFIX SUBMISSION (PORT 587)
+# POSTFIX SUBMISSION (PORT 587) — STARTTLS
+# Plain TCP connect, Postfix sends 220 banner immediately before STARTTLS.
+# smtpchk (sends EHLO, expects 250) is correct here — no SSL on initial connect.
 # ============================================
 
 frontend submission
@@ -145,7 +162,9 @@ backend postfix_submission_backend
 {% endfor %}
 
 # ============================================
-# DOVECOT IMAP (PORT 143)
+# DOVECOT IMAP (PORT 143) — plain STARTTLS
+# Dovecot sends "* OK" banner on plain TCP connect before STARTTLS negotiation.
+# balance source = same user always hits the same Dovecot node (index consistency).
 # ============================================
 
 frontend imap
@@ -164,7 +183,10 @@ backend dovecot_imap_backend
 {% endfor %}
 
 # ============================================
-# DOVECOT IMAPS (PORT 993)
+# DOVECOT IMAPS (PORT 993) — implicit SSL
+# HAProxy terminates SSL on :993, forwards plain IMAP to backend:993.
+# Health check connects with SSL to backend, expects "* OK" IMAP banner.
+# balance source = index consistency per user across Dovecot nodes.
 # ============================================
 
 frontend imaps
@@ -177,13 +199,26 @@ backend dovecot_imaps_backend
     mode tcp
     balance source
     option tcp-check
+    tcp-check connect ssl
     tcp-check expect string "* OK"
 {% for host in groups['dovecot_servers'] | default([]) %}
-    server {{ host }} {{ hostvars[host]['ansible_host'] }}:993 check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }} maxconn {{ haproxy_maxconn_per_ip | default(200) }}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:993 ssl verify none check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }} maxconn {{ haproxy_maxconn_per_ip | default(200) }}
 {% endfor %}
 
 # ============================================
-# DOVECOT MANAGESIEVE (PORT 4190)
+# PROMETHEUS MANAGESIEVE (PORT 8405) — plain TCP
+# ============================================
+frontend prometheus
+  bind *:8405
+  mode http
+  http-request use-service prometheus-exporter if { path /metrics }
+  no log
+
+# ============================================
+# DOVECOT MANAGESIEVE (PORT 4190) — plain TCP
+# Dovecot sends a capability string containing IMPLEMENTATION on connect.
+# No SSL on this port — plain TCP passthrough.
+# balance source = sieve rules are stored per-user on a specific Dovecot node.
 # ============================================
 
 frontend managesieve
@@ -196,16 +231,19 @@ backend dovecot_managesieve_backend
     mode tcp
     balance source
     option tcp-check
-    tcp-check expect string "\"IMPLEMENTATION\""
+    tcp-check expect string IMPLEMENTATION
 {% for host in groups['dovecot_servers'] | default([]) %}
     server {{ host }} {{ hostvars[host]['ansible_host'] }}:4190 check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }}
 {% endfor %}
 
 # ============================================
 # INTERNAL SERVICES
+# All bound to 127.0.0.1 — reachable only from haproxy01 itself.
+# Postfix and other local services use these to reach backend clusters.
 # ============================================
 
 # DOVECOT LMTP (PORT 24)
+# Postfix delivers mail to Dovecot via LMTP through this listener.
 listen dovecot_lmtp
     bind 127.0.0.1:24
     mode tcp
@@ -216,6 +254,7 @@ listen dovecot_lmtp
 {% endfor %}
 
 # DOVECOT SASL (PORT 12345)
+# Postfix uses this for SMTP AUTH delegation to Dovecot.
 listen dovecot_sasl
     bind 127.0.0.1:12345
     mode tcp
@@ -233,19 +272,6 @@ listen rspamd
     balance roundrobin
 {% for host in groups['rspamd_servers'] | default([]) %}
     server {{ host }} {{ hostvars[host]['ansible_host'] }}:11334 check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }}
-{% endfor %}
-
-# VALKEY (PORT 6379)
-listen valkey
-    bind 127.0.0.1:6379
-    mode tcp
-    option tcplog
-    balance roundrobin
-    option tcp-check
-    tcp-check send PING\n
-    tcp-check expect string +PONG
-{% for host in groups['valkey_servers'] | default([]) %}
-    server {{ host }} {{ hostvars[host]['ansible_host'] }}:6379 check inter {{ haproxy_health_check_interval | default('5s') }} fall {{ haproxy_health_check_fall | default(3) }} rise {{ haproxy_health_check_rise | default(2) }}
 {% endfor %}
 
 # CLAMAV (PORT 3310)

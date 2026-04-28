@@ -1,7 +1,8 @@
-### Sieve Configuration (Native 2.4.3)
-# Based on: https://doc.dovecot.org/2.4.3/core/plugins/sieve.html
+# ============================================================
+# Dovecot 2.4 Sieve Configuration
+# Managed by Ansible
+# ============================================================
 
-# Enable Sieve plugin for LDA/LMTP protocols
 protocol lda {
   mail_plugins {
     sieve = yes
@@ -14,26 +15,26 @@ protocol lmtp {
   }
 }
 
-# Personal Sieve script storage
+# Personal sieve scripts live under the user's home dir on NFS:
+# /var/vmail/{domain}/{local_part}/sieve/
+# ~ resolves to home from userdb (CONCAT('/var/vmail/', domain, '/', local_part))
 sieve_script personal {
-  driver = file
-  path = ~/sieve
+  driver      = file
+  path        = ~/sieve
   active_path = ~/.dovecot.sieve
 }
 
-# Default script when user has no personal script
+# Global default: applied when the user has no active personal script
 sieve_script default {
-  type = default
-  name = default
+  type   = default
+  name   = default
   driver = file
-  path = /etc/dovecot/sieve/default.sieve
+  path   = /etc/dovecot/sieve/default.sieve
 }
 
-# Global limits
 sieve_max_script_size = {{ dovecot_sieve_max_script_size | default('1M') }}
-sieve_max_actions = {{ dovecot_sieve_max_actions | default(32) }}
+sieve_max_actions     = {{ dovecot_sieve_max_actions | default(32) }}
 
-# ManageSieve service
 protocol managesieve {
   managesieve_notify_capability = mailto
 }

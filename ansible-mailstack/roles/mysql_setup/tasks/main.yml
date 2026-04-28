@@ -1,5 +1,9 @@
 ---
-- name: Create mailserver and roundcube databases
+# ============================================
+# CREATE MAILSTACK DATABASES
+# ============================================
+
+- name: Create mailstack databases
   community.mysql.mysql_db:
     name: "{{ item }}"
     state: present
@@ -9,8 +13,13 @@
   loop:
     - "{{ db_name }}"
     - "{{ roundcube_db_name | default('roundcubemail') }}"
+    - "{{ postfixadmin_db_name | default('postfixadmin') }}"
 
-- name: Create mailserver application user (Docker friendly)
+# ============================================
+# CREATE MAILSTACK USERS
+# ============================================
+
+- name: Create mailserver application user
   community.mysql.mysql_user:
     name: "{{ db_user }}"
     host: "%"
@@ -21,7 +30,7 @@
     login_user: root
     login_password: "{{ db_root_password }}"
 
-- name: Create Roundcube application user (Docker friendly)
+- name: Create Roundcube database user
   community.mysql.mysql_user:
     name: "{{ roundcube_db_user | default('roundcube') }}"
     host: "%"
@@ -32,25 +41,231 @@
     login_user: root
     login_password: "{{ db_root_password }}"
 
+# ============================================
+# POSTFIXADMIN DATABASE USER
+# ============================================
+
+- name: Drop existing PostfixAdmin user to ensure clean state
+  community.mysql.mysql_user:
+    name: "{{ postfixadmin_db_user | default('postfixadmin') }}"
+    host: "{{ item }}"
+    state: absent
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+  loop:
+    - "%"
+    - "localhost"
+    - "192.168.1.%"
+  ignore_errors: true
+
+- name: Create PostfixAdmin database user with correct password
+  community.mysql.mysql_user:
+    name: "{{ postfixadmin_db_user | default('postfixadmin') }}"
+    host: "%"
+    password: "{{ postfixadmin_db_password }}"
+    priv: "{{ postfixadmin_db_name | default('postfixadmin') }}.*:ALL"
+    state: present
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+
+- name: Create PostfixAdmin user for localhost as well
+  community.mysql.mysql_user:
+    name: "{{ postfixadmin_db_user | default('postfixadmin') }}"
+    host: "localhost"
+    password: "{{ postfixadmin_db_password }}"
+    priv: "{{ postfixadmin_db_name | default('postfixadmin') }}.*:ALL"
+    state: present
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+
+- name: Ensure PostfixAdmin user has proper authentication plugin
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    query: "ALTER USER '{{ postfixadmin_db_user | default('postfixadmin') }}'@'%' IDENTIFIED WITH mysql_native_password BY '{{ postfixadmin_db_password }}'"
+  ignore_errors: true
+
+- name: Flush privileges to apply changes
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    query: "FLUSH PRIVILEGES"
+
+# ============================================
+# CREATE MYSQL EXPORTER USER
+# ============================================
+
+- name: Create MySQL exporter monitoring user
+  community.mysql.mysql_user:
+    name: "exporter"
+    host: "{{ item }}"
+    password: "{{ mysql_exporter_password | default('CHANGE_ME_EXPORTER_PASSWORD') }}"
+    priv: "*.*:PROCESS,REPLICATION CLIENT,SELECT"
+    state: present
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+  loop:
+    - "localhost"
+    - "127.0.0.1"
+    - "::1"
+    - "192.168.1.%"
+  when: mysql_exporter_enabled | default(true)
+
+# ============================================
+# IMPORT MAIL SERVER SCHEMA
+# ============================================
+
+- name: Check if mailserver schema is already imported
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_db: "{{ db_name }}"
+    query: "SHOW TABLES LIKE 'domain'"
+  register: schema_check
+  ignore_errors: true
+
 - name: Copy mailserver schema to remote host
   ansible.builtin.copy:
-    # We go up one level from the playbook dir to reach the project root
     src: "{{ playbook_dir }}/../files/mail_schema.sql"
     dest: "/tmp/mail_schema.sql"
     owner: root
     group: root
     mode: '0600'
+  when: schema_check.rowcount is defined and schema_check.rowcount[0] == 0
 
 - name: Import mailserver schema
-  community.mysql.mysql_db:
-    name: "{{ db_name }}"
-    state: import
-    target: "/tmp/mail_schema.sql"
-    login_host: "{{ groups['mysql_servers'][0] }}"
-    login_user: root
-    login_password: "{{ db_root_password }}"
+  ansible.builtin.shell: |
+    mysql -h {{ groups['mysql_servers'][0] }} \
+          -u root \
+          -p'{{ db_root_password }}' \
+          {{ db_name }} < /tmp/mail_schema.sql
+  when: schema_check.rowcount is defined and schema_check.rowcount[0] == 0
+  register: import_result
+  changed_when: true
 
 - name: Remove temporary schema file
   ansible.builtin.file:
     path: "/tmp/mail_schema.sql"
     state: absent
+
+# ============================================
+# CREATE DEFAULT DOMAIN AND ADMIN
+# ============================================
+
+- name: Check if default domain already exists
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_db: "{{ db_name }}"
+    query: "SELECT domain FROM domain WHERE domain = '{{ mail_domain }}'"
+  register: domain_check
+  ignore_errors: true
+
+- name: Insert default domain if not exists
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_db: "{{ db_name }}"
+    query: "INSERT INTO domain (domain, description, max_quota, quota_used, active) VALUES ('{{ mail_domain }}', 'Primary mail domain', 10737418240, 0, 1)"
+  when: domain_check.rowcount is defined and domain_check.rowcount[0] == 0
+
+- name: Check if admin mailbox already exists
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_db: "{{ db_name }}"
+    query: "SELECT username FROM mailbox WHERE username = 'admin@{{ mail_domain }}'"
+  register: admin_check
+  ignore_errors: true
+
+- name: Set admin password from variable or default
+  ansible.builtin.set_fact:
+    admin_password_plain: "{{ mail_admin_password | default('ChangeMe123!') }}"
+
+- name: Generate bcrypt hash for admin password
+  ansible.builtin.set_fact:
+    admin_password_bcrypt: "{{ admin_password_plain | password_hash('bcrypt') }}"
+
+- name: Insert admin mailbox (without local_part since it's auto-generated)
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_db: "{{ db_name }}"
+    query: "INSERT INTO mailbox (username, password, name, domain, active, quota, send_only) VALUES ('admin@{{ mail_domain }}', '{BLF-CRYPT}{{ admin_password_bcrypt }}', 'Administrator', '{{ mail_domain }}', 1, 1073741824, 0)"
+  when: admin_check.rowcount is defined and admin_check.rowcount[0] == 0
+
+- name: Verify admin user was created
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_db: "{{ db_name }}"
+    query: "SELECT username FROM mailbox WHERE username = 'admin@{{ mail_domain }}'"
+  register: admin_verify
+  ignore_errors: true
+
+- name: Display admin credentials
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "✅ Admin user created: admin@{{ mail_domain }}"
+      - "🔑 Admin password: {{ admin_password_plain }}"
+      - "📧 Email login: admin@{{ mail_domain }}"
+      - "============================================================"
+  when: admin_verify.rowcount is defined and admin_verify.rowcount[0] > 0
+
+- name: Fail if admin user was not created
+  ansible.builtin.fail:
+    msg: "❌ Failed to create admin user admin@{{ mail_domain }}"
+  when: admin_verify.rowcount is defined and admin_verify.rowcount[0] == 0
+
+# ============================================
+# VERIFICATION
+# ============================================
+
+- name: Verify PostfixAdmin user exists and has correct password
+  community.mysql.mysql_query:
+    login_host: "{{ groups['mysql_servers'][0] }}"
+    login_user: "{{ postfixadmin_db_user | default('postfixadmin') }}"
+    login_password: "{{ postfixadmin_db_password }}"
+    query: "SELECT 'Connection successful' AS status"
+  register: postfixadmin_auth_test
+  ignore_errors: true
+
+- name: Display PostfixAdmin auth test result
+  ansible.builtin.debug:
+    msg: "PostfixAdmin database authentication: {{ '✅ SUCCESS' if postfixadmin_auth_test.failed is not defined or not postfixadmin_auth_test.failed else '❌ FAILED' }}"
+
+- name: Display database setup summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "✅ MySQL Database Setup Complete"
+      - "============================================================"
+      - "Databases created:"
+      - "  - Mailserver: {{ db_name }}"
+      - "  - Roundcube: {{ roundcube_db_name | default('roundcubemail') }}"
+      - "  - PostfixAdmin: {{ postfixadmin_db_name | default('postfixadmin') }}"
+      - "============================================================"
+      - "Users created:"
+      - "  - Mail user: {{ db_user }}"
+      - "  - Roundcube user: {{ roundcube_db_user | default('roundcube') }}"
+      - "  - PostfixAdmin user: {{ postfixadmin_db_user | default('postfixadmin') }}"
+      - "  - Exporter user: exporter (if enabled)"
+      - "============================================================"
+      - "Admin Email: admin@{{ mail_domain }}"
+      - "Admin Password: {{ admin_password_plain }}"
+      - "============================================================"
+      - "PostfixAdmin Auth Test: {{ '✅ SUCCESS' if postfixadmin_auth_test.failed is not defined or not postfixadmin_auth_test.failed else '❌ FAILED - Please check password' }}"
+      - "============================================================"

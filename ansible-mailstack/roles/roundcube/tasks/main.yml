@@ -28,52 +28,19 @@
         - /etc/apt/sources.list.d/docker.list
   when: roundcube_docker_purge_all | bool
 
-- name: Install official repository prerequisites
-  ansible.builtin.apt:
-    name: [ ca-certificates, curl, gnupg ]
-    state: present
-    update_cache: yes
-
-- name: Setup Docker GPG Keyring
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: "0755"
-
-- name: Add Docker official GPG key
-  ansible.builtin.get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    dest: /etc/apt/keyrings/docker.asc
-    mode: "a+r"
-
-- name: Add Docker official repository
-  ansible.builtin.apt_repository:
-    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
-      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release
-      }} stable"
-    state: present
-    filename: docker
-
-- name: Install Official Docker Engine and Compose Plugin
-  ansible.builtin.apt:
-    name:
-      [
-        docker-ce,
-        docker-ce-cli,
-        containerd.io,
-        docker-buildx-plugin,
-        docker-compose-plugin,
-      ]
-    state: present
-    update_cache: yes
-
-- name: Ensure Docker service is unmasked and running
-  ansible.builtin.systemd:
-    name: "{{ item }}"
-    state: started
-    enabled: yes
-    masked: no
-  loop: [ docker.socket, docker.service ]
+# Use the docker role for installation
+- name: Include docker role for Roundcube server
+  ansible.builtin.include_role:
+    name: docker
+  vars:
+    docker_users:
+      - "root"
+      - "www-data"
+    docker_service_state: started
+    docker_service_enabled: true
+    docker_cleanup_old: false
+    docker_experimental: false
+    docker_registry_mirrors: []
 
 - name: Prepare Roundcube directories
   ansible.builtin.file:
@@ -98,8 +65,73 @@
     - { src: "docker-compose.yml.j2", dest: "docker-compose.yml" }
   register: deployment_files
 
+- name: Stop and remove existing containers if config changed
+  block:
+    - name: Stop running containers
+      ansible.builtin.command:
+        cmd: docker compose down
+        chdir: "/opt/roundcube"
+      register: compose_down
+      changed_when: compose_down.rc == 0
+      failed_when: false
+      ignore_errors: true
+
+    - name: Remove existing container if still present
+      ansible.builtin.command:
+        cmd: docker rm -f roundcube roundcube-nginx
+      register: container_remove
+      changed_when: container_remove.rc == 0
+      failed_when: false
+      ignore_errors: true
+
+    - name: Remove existing network
+      ansible.builtin.command:
+        cmd: docker network rm roundcube_roundcube_net roundcube_net
+      register: network_remove
+      changed_when: network_remove.rc == 0
+      failed_when: false
+      ignore_errors: true
+  when: deployment_files is changed
+
+- name: Pull latest images
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: "/opt/roundcube"
+  register: pull_result
+  changed_when: pull_result.rc == 0
+  ignore_errors: true
+
 - name: Start Container Roundcube Stack
   ansible.builtin.command:
-    cmd: docker compose up -d --force-recreate
+    cmd: docker compose up -d
     chdir: "/opt/roundcube"
-  when: deployment_files is changed
+  register: compose_up
+  changed_when: compose_up.rc == 0
+
+- name: Wait for Roundcube container to be ready
+  ansible.builtin.wait_for:
+    port: "{{ roundcube_expose_port }}"
+    host: "0.0.0.0"
+    timeout: 120
+    delay: 10
+
+- name: Verify Roundcube is responding
+  ansible.builtin.uri:
+    url: "http://localhost:{{ roundcube_expose_port }}/"
+    status_code: 200
+  register: roundcube_health
+  ignore_errors: true
+
+- name: Display Roundcube deployment status
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Roundcube Deployment Status"
+      - "============================================================"
+      - "Webmail URL:       http://{{ ansible_host }}:{{ roundcube_expose_port }}"
+      - "IMAP via HAProxy:  ssl://{{ roundcube_imap_host }}:{{ roundcube_imap_port }}"
+      - "SMTP via HAProxy:  ssl://{{ roundcube_smtp_host }}:{{ roundcube_smtp_port }}"
+      - "ManageSieve:       {{ roundcube_managesieve_host }}:{{ roundcube_managesieve_port }}"
+      - "HAProxy IP:        {{ haproxy_internal_ip }}"
+      - "Status: {{ '✅ Running' if roundcube_health.status == 200 else '❌ Check logs' }}"
+      - "============================================================"

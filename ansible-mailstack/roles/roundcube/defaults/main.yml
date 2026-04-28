@@ -1,24 +1,40 @@
 ---
 roundcube_docker_purge_all: false
 roundcube_docker_image: "roundcube/roundcubemail:latest"
-roundcube_db_type: "mysql"
-roundcube_db_name: "roundcubemail"
-roundcube_db_user: "roundcube"
+
+# Roundcube's own database (session, contacts, etc.)
+roundcube_db_type:     "mysql"
+roundcube_db_name:     "roundcubemail"
+roundcube_db_user:     "roundcube"
 roundcube_db_password: "CHANGE_ME_ROUNDCUBE_DB_PASSWORD"
-roundcube_des_key: "rcmail-2026-dynamic-stack-secret"
+
+# Mailserver database — used by the password plugin
+mailserver_db_name:     "mailserver"
+mailserver_db_user:     "{{ db_user }}"
+mailserver_db_password: "{{ db_password }}"
+
+roundcube_des_key:     "rcmail-2026-dynamic-stack-secret"
 roundcube_expose_port: 80
-roundcube_imap_port: 993
-roundcube_smtp_port: 465
-roundcube_skin: "elastic"
-roundcube_imap_cluster: "{{ groups['dovecot_servers'] | map('extract', hostvars,
-  ['ansible_host']) | list }}"
-roundcube_smtp_cluster: "{{ groups['postfix_servers'] | map('extract', hostvars,
-  ['ansible_host']) | list }}"
+roundcube_skin:        "elastic"
+
+# ============================================
+# IMAP/SMTP/MANAGESIEVE — all via HAProxy
+# dovecot_host and postfix_primary_host now resolve
+# to haproxy_internal_ip so these just follow through.
+# ============================================
+roundcube_imap_host:        "{{ dovecot_host }}"
+roundcube_imap_port:        "{{ dovecot_imaps_port | default(993) }}"
+
+roundcube_smtp_host:        "{{ postfix_primary_host }}"
+roundcube_smtp_port:        "{{ postfix_primary_smtps | default(465) }}"
+
+roundcube_managesieve_host: "{{ dovecot_host }}"
+roundcube_managesieve_port: "{{ dovecot_managesieve_port | default(4190) }}"
 
 roundcube_plugins:
   - archive
   - zipdownload
-  #- managesieve
+  - managesieve
   - password
   - markasjunk
   - identity_select
@@ -29,4 +45,3 @@ roundcube_plugins:
   - identicon
   - enigma
   - show_additional_headers
-

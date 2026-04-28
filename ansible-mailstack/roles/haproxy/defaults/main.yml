@@ -55,6 +55,7 @@ haproxy_external_ports:
   - 80 # HTTP (Roundcube)
   - 443 # HTTPS (Roundcube)
 
+
 # Internal ports (only allow from internal networks, never internet)
 haproxy_internal_ports:
   - 24 # LMTP (Postfix -> Dovecot)
@@ -63,6 +64,7 @@ haproxy_internal_ports:
   - 6379 # Valkey
   - 3310 # ClamAV
   - 8404 # Stats (only localhost)
+  - 8405 # HTTP (Prometheus)  
 
 # Internal networks allowed
 haproxy_internal_networks:

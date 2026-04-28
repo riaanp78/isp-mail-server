@@ -1,0 +1,37 @@
+---
+- name: Deploy PostfixAdmin Web Interface
+  hosts: postfixadmin_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - curl
+          - gnupg
+          - ca-certificates
+          - python3-mysqldb
+          - python3-pymysql
+        state: present
+
+  roles:
+    - postfixadmin
+
+  post_tasks:
+    - name: Display PostfixAdmin access information
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "🌐 PostfixAdmin Access"
+          - "============================================================"
+          - "URL: http://{{ ansible_host }}:{{ postfixadmin_expose_port }}"
+          - "Setup Page: http://{{ ansible_host }}:{{ postfixadmin_expose_port }}/setup.php"
+          - "============================================================"
+
+          

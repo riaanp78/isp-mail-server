@@ -1,6 +1,10 @@
 # MySQL virtual mailbox map
-user = {{ db_user }}
+# Queries the postfix_mailboxes view.
+# Returns: {domain}/{local_part}/Maildir/
+# This tells Postfix the mailbox exists; actual delivery is via LMTP.
+user     = {{ db_user }}
 password = {{ db_password }}
-hosts = {{ db_host }}
-dbname = {{ db_name }}
-query = SELECT CONCAT(domain, '/', local_part, '/') FROM mailbox WHERE username='%s' AND active='1'
+hosts    = {{ db_host }}
+dbname   = {{ db_name }}
+query    = SELECT maildir FROM postfix_mailboxes WHERE username='%s'
+

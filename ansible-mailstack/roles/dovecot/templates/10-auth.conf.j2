@@ -1,6 +1,11 @@
-auth_mechanisms = plain login
-auth_allow_cleartext = no
-auth_username_format = %{user | lower}
+# ============================================================
+# Dovecot 2.4 Authentication
+# Managed by Ansible
+# ============================================================
 
-# In 2.4.3, we include the database resource and query definitions
+auth_mechanisms        = plain login
+auth_allow_cleartext   = no
+auth_username_format   = %{user | lower}
+
+# passdb + userdb blocks live in auth-sql.conf.ext
 !include auth-sql.conf.ext

@@ -171,3 +171,17 @@ scrape_configs:
 {% endfor %}
     # No relabel_configs needed - job name is already 'postfix'
 {% endif %}
+
+
+
+# HAPROXY
+{% if haproxy_exporter | default(false) %}
+  - job_name: 'haproxy'
+    static_configs:
+      - targets:
+{% for host in groups['haproxy_servers'] %}
+{% if 'ansible_host' in hostvars[host] %}
+        - '{{ hostvars[host]['ansible_host'] }}:{{ haproxy_exporter_port | default(8405) }}'
+{% endif %}
+{% endfor %}
+{% endif %}

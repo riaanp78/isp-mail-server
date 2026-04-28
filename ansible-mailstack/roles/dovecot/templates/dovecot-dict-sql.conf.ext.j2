@@ -1,18 +1,25 @@
-## Dictionary SQL configuration (Native 2.4.3)
+# ============================================================
+# Dovecot 2.4 Dict SQL Configuration
+# Used for quota byte/message count reporting into the quota table.
+# The 'count' driver enforces limits; this dict stores the running
+# totals so you can query actual usage via SQL.
+#
+# Reference this file in 90-quota.conf if you enable quota_clone
+# or a dict-based quota backend in future.
+# ============================================================
 
-# The 'mysql:' prefix ensures the dictionary service loads the correct library
 connect = mysql:host={{ db_host }} dbname={{ db_name }} user={{ db_user }} password={{ db_password }} port={{ db_port | default(3306) }}
 
 map {
-  pattern = priv/quota/storage
-  table = quota
+  pattern        = priv/quota/storage
+  table          = quota
   username_field = username
-  value_field = bytes
+  value_field    = bytes
 }
 
 map {
-  pattern = priv/quota/messages
-  table = quota
+  pattern        = priv/quota/messages
+  table          = quota
   username_field = username
-  value_field = count
+  value_field    = messages
 }

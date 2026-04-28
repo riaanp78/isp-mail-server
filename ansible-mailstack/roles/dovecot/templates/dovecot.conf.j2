@@ -1,8 +1,25 @@
-# Dovecot 2.4 Native Configuration
-dovecot_config_version = 2.4.0
-dovecot_storage_version = 2.3.20
+# ============================================================
+# Dovecot 2.4 Main Configuration
+# Managed by Ansible
+# ============================================================
 
-# Protocols
+dovecot_config_version = 2.4.0
+dovecot_storage_version = 2.4.0
+
 protocols = imap pop3 lmtp sieve
+
+# ============================================================
+# SQL Driver — defined here at top level so it is available
+# to both passdb and userdb regardless of which conf.d file
+# they are declared in.
+# ============================================================
+sql_driver = mysql
+
+mysql {{ db_host }} {
+  dbname   = {{ db_name }}
+  user     = {{ db_user }}
+  password = {{ db_password }}
+  port     = {{ db_port | default(3306) }}
+}
 
 !include conf.d/*.conf

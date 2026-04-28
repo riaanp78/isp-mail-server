@@ -1,0 +1,33 @@
+---
+# Docker daemon configuration
+docker_daemon_config:
+  log-driver: "json-file"
+  log-opts:
+    max-size: "10m"
+    max-file: "3"
+  storage-driver: "overlay2"
+  ip-forward: true
+  iptables: true
+  ip-masq: true
+  userland-proxy: false
+
+# Docker version to install (use specific version or 'latest')
+docker_version: "latest"
+
+# Docker service configuration
+docker_service_state: started
+docker_service_enabled: true
+
+# Docker user (add users to docker group)
+docker_users:
+  - "root"
+
+# Enable experimental features
+docker_experimental: false
+
+# Cleanup old Docker versions before install
+docker_cleanup_old: true
+
+# Docker repository mirrors (for faster pulls - optional)
+docker_registry_mirrors: []
+

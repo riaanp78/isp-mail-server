@@ -1,7 +1,25 @@
 <?php
-$config['plugins'] = [];
+// ============================================
+// Roundcube config.inc.php
+// Managed by Ansible — DO NOT EDIT MANUALLY
+// Generated: {{ ansible_date_time.iso8601 }}
+//
+// IMAP/SMTP/ManageSieve all point to HAProxy ({{ roundcube_imap_host }})
+// HAProxy load-balances to the Dovecot/Postfix cluster.
+// balance=source ensures each user sticks to the same Dovecot node.
+// ============================================
 
-// IMAP connection options for self-signed certificates
+// ============================================
+// IMAP CONNECTION SETTINGS
+// Roundcube → HAProxy:993 → Dovecot cluster (balance source)
+// ============================================
+$config['default_host'] = 'ssl://{{ roundcube_imap_host }}';
+$config['default_port'] = {{ roundcube_imap_port }};
+
+$config['imap_auth_type'] = 'PLAIN';
+$config['username_domain'] = '';
+$config['login_lc'] = 2;
+
 $config['imap_conn_options'] = [
   'ssl' => [
     'verify_peer'       => false,
@@ -9,6 +27,18 @@ $config['imap_conn_options'] = [
     'allow_self_signed' => true,
   ],
 ];
+
+// ============================================
+// SMTP CONNECTION SETTINGS
+// Roundcube → HAProxy:465 → Postfix cluster (balance roundrobin)
+// ============================================
+$config['smtp_server'] = 'ssl://{{ roundcube_smtp_host }}';
+$config['smtp_port']   = {{ roundcube_smtp_port }};
+$config['smtp_auth_type'] = 'PLAIN';
+
+$config['smtp_user'] = '%u';
+$config['smtp_pass'] = '%p';
+
 $config['smtp_conn_options'] = [
   'ssl' => [
     'verify_peer'       => false,
@@ -18,11 +48,26 @@ $config['smtp_conn_options'] = [
 ];
 
 // ============================================
-// MANAGESIEVE PLUGIN CONFIGURATION
+// DATABASE CONNECTION (Roundcube own DB)
 // ============================================
-$config['managesieve_host'] = '{{ dovecot_host }}';
-$config['managesieve_port'] = {{ dovecot_managesieve_port | default(4190) }};
-$config['managesieve_auth_type'] = 'LOGIN';
+$config['db_dsnw'] = 'mysql://{{ roundcube_db_user }}:{{ roundcube_db_password }}@{{ mysql_host }}/{{ roundcube_db_name }}';
+
+// ============================================
+// PLUGINS
+// ============================================
+$config['plugins'] = [
+{% for plugin in roundcube_plugins %}
+    '{{ plugin }}',
+{% endfor %}
+];
+
+// ============================================
+// MANAGESIEVE PLUGIN
+// Roundcube → HAProxy:4190 → Dovecot cluster (balance source)
+// ============================================
+$config['managesieve_host'] = '{{ roundcube_managesieve_host }}';
+$config['managesieve_port'] = {{ roundcube_managesieve_port }};
+$config['managesieve_auth_type'] = 'PLAIN';
 $config['managesieve_usetls'] = false;
 $config['managesieve_conn_options'] = [
   'ssl' => [
@@ -33,42 +78,56 @@ $config['managesieve_conn_options'] = [
 ];
 
 // ============================================
-// PASSWORD PLUGIN CONFIGURATION
+// PASSWORD PLUGIN
+// Connects directly to mailserver DB — not via HAProxy
 // ============================================
-
-// Enable password plugin
-$config['plugins'][] = 'password';
-
-// Use SQL driver
 $config['password_driver'] = 'sql';
+$config['password_db_dsn'] = 'mysql://{{ mailserver_db_user }}:{{ mailserver_db_password }}@{{ mysql_host }}/{{ mailserver_db_name }}';
+$config['password_algorithm'] = 'dovecot:BLF-CRYPT';
+$config['password_dovecotpw'] = '/usr/bin/doveadm pw';
+$config['password_query'] = "UPDATE mailbox SET password = %P WHERE username = '%u'";
+$config['password_confirm_current']  = true;
+$config['password_minimum_length']   = 8;
+$config['password_log']              = true;
+$config['password_require_nonalpha'] = false;
+$config['password_require_digit']    = false;
+$config['password_change_success']   = 'Password successfully changed. Please log in again.';
 
-// Database connection for password changes
-$config['password_db_dsn'] = 'mysql://{{ db_user }}:{{ db_password }}@{{ mysql_host }}/{{ db_name }}';
+// ============================================
+// ENIGMA (GnuPG) PLUGIN
+// ============================================
+$config['enigma_pgp_homedir'] = '/var/www/html/temp/enigma';
+$config['enigma_encryption']  = true;
+$config['enigma_signatures']  = true;
 
-// **CRITICAL:** Use blowfish-crypt (bcrypt) algorithm.
-// This is the standard format for Dovecot (BLF-CRYPT).
-$config['password_algorithm'] = 'blowfish-crypt';
+// ============================================
+// USER INTERFACE
+// ============================================
+$config['skin']               = '{{ roundcube_skin | default("elastic") }}';
+$config['prefer_html']        = true;
+$config['htmleditor']         = true;
+$config['prettydate']         = true;
+$config['message_show_email'] = true;
+$config['show_images']        = 1;
+$config['layout']             = 'widescreen';
 
-// Set the cost for the bcrypt algorithm (Dovecot's default is 5, but 10 is a good balance)
-$config['password_algorithm_options'] = [
-    'cost' => 10,
-];
+$config['drafts_mbox']     = 'Drafts';
+$config['sent_mbox']       = 'Sent';
+$config['junk_mbox']       = 'Junk';
+$config['trash_mbox']      = 'Trash';
+$config['default_folders'] = ['INBOX', 'Drafts', 'Sent', 'Junk', 'Trash'];
 
-// **CRITICAL:** Use the '%P' macro in your query.
-// Roundcube will automatically replace '%P' with the hashed password
-// based on the algorithm you specified above.
-$config['password_query'] = 'UPDATE mailbox SET password = %P WHERE username = %u';
+// ============================================
+// PERFORMANCE & CACHING
+// ============================================
+$config['enable_caching']         = true;
+$config['message_cache_lifetime'] = '10d';
+$config['refresh_interval']       = 60;
+$config['mail_pagesize']          = 50;
 
-// Security settings
-$config['password_confirm_current'] = true;      // Require current password
-$config['password_minimum_length'] = 8;          // Minimum password length
-$config['password_log'] = true;                  // Log password changes
-$config['password_require_nonalpha'] = false;    // Don't require special characters
-$config['password_require_digit'] = false;       // Don't require numbers
-
-// Custom success message
-$config['password_change_success'] = 'Password successfully changed. Please log in with your new password.';
-
-
- 
- 
+// ============================================
+// SECURITY
+// ============================================
+$config['des_key']        = '{{ roundcube_des_key }}';
+$config['ip_check']       = false;
+$config['session_lifetime'] = 10;
